@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="vi" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DN Product Studio</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app-bg-glow"></div>
+<div class="shell">
+  <aside class="sidebar glass-panel" id="sidebar"></aside>
+  <main class="main glass-panel" id="main"></main>
+</div>
+<div id="overlay"></div>
+<div class="toasts" id="toasts"></div>
+<script>window.SESSION_KEY = "__SESSION_KEY__";
+// Very old Windows without the Edge WebView2 runtime falls back to an engine that cannot run this UI.
+if (!window.fetch || !window.Promise) {
+  document.getElementById("main").innerHTML = '<div style="padding:32px;font:16px Segoe UI,sans-serif;color:#fff">' +
+    '<b>M\u00e1y thi\u1ebfu Microsoft Edge WebView2.</b><br>T\u1ea3i v\u00e0 c\u00e0i t\u1ea1i ' +
+    'https://developer.microsoft.com/microsoft-edge/webview2/ r\u1ed3i m\u1edf l\u1ea1i tool.</div>';
+}</script>
+<script src="lucide.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
