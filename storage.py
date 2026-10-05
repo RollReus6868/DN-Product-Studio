@@ -10,9 +10,8 @@ from pathlib import Path
 from app_info import APP_ID
 
 DEFAULTS = {
-    "site_base": os.environ.get("DNPS_SITE_BASE") or "https://base44.app",
-    "site_app_id": "6aa80a3918e73ce9a7b4d0f7",
-    "site_url": "https://dangerous-scripture-stream-hub.base44.app",
+    # the website's entry point for this tool (Supabase edge function "toolApi")
+    "site_api_url": os.environ.get("DNPS_SITE_API") or "https://qztnndbhauzawchfhcui.supabase.co/functions/v1/toolApi",
     "default_price": 9.99,
     "shared_variant_id": "",
     "ebook_folder": "",

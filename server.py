@@ -52,7 +52,7 @@ def ui_dir() -> Path:
 
 # ------------------------------------------------------------------ items
 def _client(cfg: dict) -> webstore.SiteClient:
-    return webstore.SiteClient(cfg["site_base"], cfg["site_app_id"], storage.get_token())
+    return webstore.SiteClient(cfg["site_api_url"], storage.get_token())
 
 
 def _get(kind: str, item_id: str) -> tuple[dict, dict]:
@@ -255,6 +255,35 @@ def api_pods_add(body: dict) -> dict:
     return {**api_state({}), "added": added, "errors": errors}
 
 
+# ------------------------------------------------------------------ PDFs of books copied from the old site
+def _local_pdfs(cfg: dict) -> dict:
+    folder = Path(cfg["ebook_folder"]) if cfg["ebook_folder"] else None
+    if not folder or not folder.is_dir():
+        return {}
+    return {p.name.lower(): p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".pdf"}
+
+
+def api_restore_list(_body: dict) -> dict:
+    cfg = storage.load_config()
+    try:
+        pending = _client(cfg).pending_pdfs()
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
+    local = _local_pdfs(cfg)
+    return {"items": [{**p, "found": p["file_name"].lower() in local} for p in pending]}
+
+
+def api_restore_one(body: dict) -> dict:
+    cfg = storage.load_config()
+    path = _local_pdfs(cfg).get(str(body.get("file_name") or "").lower())
+    if not path:
+        raise ApiError("Không thấy file này trong thư mục đang chọn.")
+    try:
+        return {"attached": webstore.restore_pdf(str(path), _client(cfg))}
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
+
+
 # ------------------------------------------------------------------ site + token
 def api_site_ping(_body: dict) -> dict:
     cfg = storage.load_config()
@@ -347,6 +376,7 @@ ROUTES = {
     "/api/item/update": api_item_update, "/api/item/remove": api_item_remove,
     "/api/item/prompt": api_item_prompt, "/api/item/reply": api_item_reply,
     "/api/item/listing": api_item_listing, "/api/item/publish": api_item_publish,
+    "/api/restore/list": api_restore_list, "/api/restore/one": api_restore_one,
     "/api/site/ping": api_site_ping, "/api/token/generate": api_token_generate,
     "/api/token/set": api_token_set, "/api/token/show": api_token_show, "/api/open": api_open,
     "/api/update/check": api_update_check, "/api/update/install": api_update_install,

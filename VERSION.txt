@@ -1,1 +1,2 @@
+1.1.0  Lam viec voi website moi (Supabase): tai file thang vao kho, gan lai PDF cho sach cu.
 1.0.0  Ban dau tien: Ebook (PDF + anh bia cung ten), POD tu link Spring, dang ban nhap len web, tu cap nhat.

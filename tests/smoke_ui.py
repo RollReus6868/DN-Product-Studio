@@ -74,7 +74,13 @@ import storage  # noqa: E402
 from selfcheck import tiny_pdf  # noqa: E402
 
 site = FakeSite()
-storage.save_config({"site_base": site.base})
+storage.save_config({"site_api_url": site.api})
+# two books copied from the old site still wait for their PDFs (one of them is in the test folder)
+site.records["Ebook"] += [
+    {"id": "o1", "title": "The Ethiopian Canon - Full Version", "slug": "the-ethiopian-canon", "status": "published",
+     "secure_file_uri": "mp/private/6aa80a39/b75b1f850_The-Ethiopian-Canon.pdf"},
+    {"id": "o2", "title": "Jubilees - Part 4", "slug": "jubilees-part-4", "status": "published",
+     "secure_file_uri": "mp/private/6aa80a39/ceb5bb886_Jubilees_4-Back-Matter.pdf"}]
 _srv, URL = server.start()
 
 books = Path(tempfile.mkdtemp(prefix="BOOK_"))
@@ -122,7 +128,15 @@ def main() -> int:
                 page.click('[data-act="scan"]')
                 page.wait_for_selector(".item")
                 assert page.locator(".item").count() == 4
+                page.wait_for_selector('[data-act="restore"]')
                 shot("02_ebook_scanned")
+                page.click('[data-act="restore"]')
+                page.wait_for_function("!document.querySelector('[data-act=restore]')", timeout=30000)
+                assert site.records["Ebook"][0]["secure_file_uri"].endswith("the-ethiopian-canon.pdf"), site.records["Ebook"][0]
+                assert page.locator(".note.info").count() == 1   # one book is still waiting: its file is not in this folder
+                site.records["Ebook"].clear()
+                page.click('[data-act="scan"]')
+                page.wait_for_function("!document.querySelector('.note.info')")
                 # edit the price inline
                 price = page.locator(".item").nth(2).locator('[data-field="price"]')
                 price.fill("26,99")

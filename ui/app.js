@@ -14,7 +14,7 @@ const CATEGORIES = ["Apparel", "Wall Art", "Mugs", "Gifts", "Books"];
 const WEB_STATUS = { "": ["muted", "circle-dashed", "Chưa đăng"], draft: ["info", "file-pen-line", "Bản nháp trên web"], published: ["ok", "globe", "Đang bán trên web"] };
 
 const S = { page: "ebook", app: {}, config: {}, hasToken: false, ebooks: [], pods: [], busy: {}, errors: {},
-  notes: null, podErrors: [], update: null, upd: null, ping: null, running: false };
+  notes: null, restore: null, podErrors: [], update: null, upd: null, ping: null, running: false };
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const icon = (name, cls = "") => `<i data-lucide="${name}" class="${cls}"></i>`;
@@ -126,6 +126,13 @@ const PAGES = {
       n.no_cover?.length ? `<div class="note">${icon("image-off")}<span><b>${n.no_cover.length} PDF chưa có ảnh bìa cùng tên:</b> ${esc(n.no_cover.join(", "))}</span></div>` : "",
       n.no_pdf?.length ? `<div class="note info">${icon("info")}<span><b>${n.no_pdf.length} ảnh không có PDF cùng tên (bỏ qua):</b> ${esc(n.no_pdf.join(", "))}</span></div>` : "",
     ].join("");
+    const r = S.restore;
+    const here = r ? r.items.filter((i) => i.found) : [];
+    const restore = !r || !r.items.length ? "" : `<div class="note info">${icon("file-up")}<span class="grow"><b>${r.items.length} sách trên web chưa có file PDF</b> (sách chép từ web cũ).
+        ${here.length ? `${here.length} file có trong thư mục này.` : "Thư mục này không có file nào trùng tên."}
+        ${r.items.length > here.length ? `<br><span class="muted">Còn thiếu: ${esc(r.items.filter((i) => !i.found).map((i) => i.file_name).join(", "))}</span>` : ""}
+        ${r.done ? `<br>Đã tải ${r.done}/${r.total}…` : ""}</span>
+        ${here.length ? `<button class="btn soft sm" data-act="restore" ${r.running ? "disabled" : ""}>${icon(r.running ? "loader-circle" : "upload", r.running ? "spin" : "")}Tải ${here.length} file lên</button>` : ""}</div>`;
     const rows = S.ebooks.map((it) => `<div class="item ${S.busy[it.id] ? "busy" : ""}" data-kind="ebook" data-id="${esc(it.id)}">
       <div class="thumb">${it.has_cover ? `<img alt="" src="/api/cover?k=${encodeURIComponent(window.SESSION_KEY)}&id=${encodeURIComponent(it.id)}">` : icon("image-off")}</div>
       <div class="item-main">
@@ -141,7 +148,7 @@ const PAGES = {
           <div class="input-icon">${icon("folder-open")}<input class="input" id="folder" value="${esc(S.config.ebook_folder)}" placeholder="Thư mục chứa PDF và ảnh bìa, ví dụ E:\\BOOK_1" aria-label="Thư mục ebook"></div>
           ${S.app.native ? `<button class="btn outline" style="height:44px" data-act="pick">${icon("folder-search")}Chọn thư mục</button>` : ""}
           <button class="btn soft" style="height:44px" data-act="scan">${icon("scan-search")}Quét</button>
-        </div>${notes}
+        </div>${notes}${restore}
       </div>
       <div class="page-body">${rows || `<div class="empty"><div class="icon-tile">${icon("book-open")}</div><b>Chưa có ebook nào</b>
         <span>Chọn thư mục có file PDF và ảnh bìa trùng tên (ví dụ <code>Enoch.pdf</code> và <code>Enoch.png</code>) rồi bấm Quét.</span></div>`}</div>
@@ -192,7 +199,7 @@ const PAGES = {
       <div class="page-body"><div class="sections">
         <section><div class="section-head"><div class="icon-tile sm">${icon("plug-zap")}</div><h2>Kết nối website</h2></div>
           <div class="card">
-            <div class="set-row"><div class="grow"><b>Mã bí mật</b><span class="muted small">Website chỉ nhận sản phẩm từ tool có đúng mã này. Dán mã vào Base44 › Dashboard › Secrets với tên <code>TOOL_API_TOKEN</code>.</span></div>
+            <div class="set-row"><div class="grow"><b>Mã bí mật</b><span class="muted small">Website chỉ nhận sản phẩm từ tool có đúng mã này. Dán mã vào Supabase › Edge Functions › Secrets với tên <code>TOOL_API_TOKEN</code>.</span></div>
               ${S.hasToken ? `<span class="pill ok">${icon("key-round")}Đã có mã</span><button class="btn outline sm" data-act="token-copy">${icon("copy")}Copy mã</button>`
                 : `<button class="btn soft sm" data-act="token-new">${icon("key-round")}Tạo mã</button>`}
               <button class="btn ghost sm" data-act="token-paste">${icon("clipboard-paste")}Nhập mã có sẵn</button></div>
@@ -228,9 +235,9 @@ const PAGES = {
       <div class="page-body"><div class="sections">
         <section><div class="section-head"><div class="icon-tile sm">${icon("wrench")}</div><h2>Cài đặt lần đầu</h2></div>
           <div class="card"><div class="steps">
-            ${step("Tạo mã bí mật", "Vào Cài đặt › Tạo mã › Copy mã. Mở Base44 › Dashboard của web › Secrets, thêm secret tên <code>TOOL_API_TOKEN</code> và dán mã vào.")}
+            ${step("Tạo mã bí mật", "Vào Cài đặt › Tạo mã › Copy mã. Mở Supabase › dự án dark-network › Edge Functions › Secrets, thêm secret tên <code>TOOL_API_TOKEN</code> và dán mã vào.")}
             ${step("Tạo một sản phẩm Ebook chung trên Lemon Squeezy", "Chỉ tạo một lần: tên bất kỳ (ví dụ “Dark Network Ebook”), giá bất kỳ, không cần đính kèm file. Copy Variant ID của nó, dán vào Cài đặt › Variant ID dùng chung.")}
-            ${step("Kiểm tra kết nối", "Cài đặt › Kiểm tra kết nối phải báo xanh. Nếu báo chưa có cổng nhận sản phẩm thì website chưa được Publish bản mới.")}
+            ${step("Kiểm tra kết nối", "Cài đặt › Kiểm tra kết nối phải báo xanh. Nếu báo website chưa có mã bí mật thì bước 1 chưa xong.")}
           </div></div></section>
         <section><div class="section-head"><div class="icon-tile sm">${icon("book-open")}</div><h2>Đăng ebook</h2></div>
           <div class="card"><div class="steps">
@@ -367,6 +374,25 @@ async function scan(folder) {
     toast("success", `Tìm thấy ${S.ebooks.length} ebook.`);
   } catch (e) { toast("error", e.message); }
   render();
+  loadRestore();
+}
+// Books copied from the old site wait for their PDF; quiet when the site is not reachable yet.
+async function loadRestore() {
+  if (!S.hasToken || !S.config.ebook_folder) return;
+  try { S.restore = await api("/api/restore/list"); } catch (e) { S.restore = null; }
+  if (S.page === "ebook") render();
+}
+async function runRestore() {
+  const todo = S.restore.items.filter((i) => i.found);
+  Object.assign(S.restore, { running: true, done: 0, total: todo.length });
+  render();
+  let ok = 0;
+  for (const it of todo) {
+    try { await api("/api/restore/one", { file_name: it.file_name }); ok += 1; } catch (e) { toast("error", `${it.file_name}: ${e.message}`); }
+    S.restore.done += 1; render();
+  }
+  toast(ok === todo.length ? "success" : "error", `Đã gắn lại PDF cho ${ok}/${todo.length} file.`);
+  await loadRestore();
 }
 async function pollUpdate() {
   try { S.upd = await api("/api/update/progress"); } catch (e) { return; }
@@ -389,6 +415,7 @@ const ACTIONS = {
   async quit() { await api("/api/quit").catch(() => {}); document.body.innerHTML = '<div class="empty" style="height:100%"><b>Tool đã thoát. Bạn có thể đóng tab này.</b></div>'; },
   async pick() { try { const r = await api("/api/pick-folder"); if (r.folder) { $("#folder").value = r.folder; scan(r.folder); } } catch (e) { toast("error", e.message); } },
   scan() { scan($("#folder").value); },
+  restore() { runRestore(); },
   write(el, row) { openWriter(row.dataset.kind, row.dataset.id); },
   publish(el, row) { publish(row.dataset.kind, row.dataset.id).then((ok) => ok && toast("success", "Đã đăng lên web ở dạng bản nháp.")); },
   "publish-all"(el) { publishAll(el.dataset.kind); },
@@ -404,11 +431,11 @@ const ACTIONS = {
     } catch (e) { toast("error", e.message); }
     delete S.busy.pods; render();
   },
-  async "token-new"() { try { const r = await api("/api/token/generate"); S.hasToken = true; await copyText(r.token); toast("success", "Đã tạo mã và copy vào bộ nhớ tạm. Dán vào Base44 › Secrets › TOOL_API_TOKEN."); } catch (e) { toast("error", e.message); } render(); },
+  async "token-new"() { try { const r = await api("/api/token/generate"); S.hasToken = true; await copyText(r.token); toast("success", "Đã tạo mã và copy vào bộ nhớ tạm. Dán vào Supabase › Edge Functions › Secrets › TOOL_API_TOKEN."); } catch (e) { toast("error", e.message); } render(); },
   async "token-copy"() { const r = await api("/api/token/show"); toast((await copyText(r.token)) ? "success" : "error", "Đã copy mã bí mật."); },
   "token-paste"() {
     dialog(`<div class="dialog-head"><div class="icon-tile sm">${icon("key-round")}</div><h2>Nhập mã có sẵn</h2></div>
-      <div class="dialog-body"><p class="muted">Dùng khi cài tool trên máy thứ hai: dán đúng mã đang đặt trong Base44.</p>
+      <div class="dialog-body"><p class="muted">Dùng khi cài tool trên máy thứ hai: dán đúng mã đang đặt trong Supabase.</p>
         <input class="input" id="t-val" type="password" placeholder="Mã bí mật" aria-label="Mã bí mật"><div class="item-error" id="t-err"></div></div>
       <div class="dialog-foot"><span class="grow"></span><button class="btn ghost" data-act="close">Thôi</button><button class="btn soft" data-act="token-save">Lưu mã</button></div>`, true);
     $("#t-val").focus();
@@ -452,5 +479,6 @@ document.addEventListener("keydown", (ev) => {
   try { setState(await api("/api/state")); } catch (e) { $("#main").innerHTML = `<div class="empty"><b>${esc(e.message)}</b></div>`; return; }
   applyTheme();
   render();
+  loadRestore();
   checkUpdate(true);
 })();

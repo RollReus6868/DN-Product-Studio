@@ -1,4 +1,4 @@
-# DN Product Studio 1.0.0
+# DN Product Studio 1.1.0
 
 Tool đăng sản phẩm lên website Dark Network: **ebook** (PDF + ảnh bìa) và **POD qua Spring**. Chạy trên Windows và macOS, tự cập nhật.
 
@@ -10,7 +10,7 @@ Vào mục **Releases** của kho này, tải file theo bảng trong ghi chú ph
 
 Cài đặt một lần (trang **Hướng dẫn** trong tool ghi lại từng bước):
 
-1. **Cài đặt › Tạo mã** rồi dán mã vào Base44 › Dashboard của web › **Secrets**, tên `TOOL_API_TOKEN`.
+1. **Cài đặt › Tạo mã** rồi dán mã vào Supabase › dự án của web › Edge Functions › **Secrets**, tên `TOOL_API_TOKEN`.
 2. Trên Lemon Squeezy tạo **một** sản phẩm “Ebook” chung, dán Variant ID của nó vào **Cài đặt**.
 3. **Kiểm tra kết nối** phải báo xanh.
 

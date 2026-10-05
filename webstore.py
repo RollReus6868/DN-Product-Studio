@@ -26,14 +26,14 @@ class SiteError(RuntimeError):
 
 
 class SiteClient:
-    def __init__(self, base: str, app_id: str, token: str):
-        self.url = f"{base.rstrip('/')}/api/apps/{app_id}/functions/toolApi"
-        self.headers = {"X-Tool-Token": token, "X-App-Id": str(app_id), "User-Agent": f"{APP_ID}/{APP_VERSION}"}
+    def __init__(self, url: str, token: str):
+        self.url = url
+        self.headers = {"X-Tool-Token": token, "User-Agent": f"{APP_ID}/{APP_VERSION}"}
         self.token = token
 
     def _call(self, timeout: float, **kw) -> dict:
         if not self.token:
-            raise SiteError("Chưa có mã bí mật. Vào Cài đặt để tạo mã và dán vào Base44.", "no_token")
+            raise SiteError("Chưa có mã bí mật. Vào Cài đặt để tạo mã và dán vào Supabase.", "no_token")
         try:
             r = requests.post(self.url, headers=self.headers, timeout=timeout, **kw)
         except requests.RequestException as exc:
@@ -43,14 +43,17 @@ class SiteClient:
         except ValueError:
             data = {}
         if r.status_code == 401:
-            raise SiteError("Website từ chối mã bí mật. Mã trong tool phải giống hệt secret TOOL_API_TOKEN trên Base44.", "auth")
+            raise SiteError("Website từ chối mã bí mật. Mã trong tool phải giống hệt secret TOOL_API_TOKEN trên Supabase.", "auth")
         if r.status_code == 404:
-            raise SiteError("Website chưa có cổng nhận sản phẩm (toolApi). Cần gộp bản cập nhật website rồi bấm Publish "
-                            "trên Base44.", "not_deployed")
+            raise SiteError("Không thấy cổng nhận sản phẩm (toolApi) của website. Hãy cập nhật tool lên bản mới nhất.",
+                            "not_deployed")
         if r.status_code == 409:
             raise SiteError(data.get("error") or "Trên web đã có sản phẩm cùng đường dẫn.", "exists")
         if r.status_code == 413:
             raise SiteError("File quá lớn, website không nhận. Hãy tải file này lên bằng trang Admin của web.", "too_large")
+        if r.status_code == 500 and "TOOL_API_TOKEN" in str(data.get("error") if isinstance(data, dict) else ""):
+            raise SiteError("Website chưa có mã bí mật. Vào Supabase › Edge Functions › Secrets, thêm TOOL_API_TOKEN "
+                            "bằng mã trong Cài đặt của tool.", "auth")
         if r.status_code >= 400 or not isinstance(data, dict):
             detail = (data.get("error") if isinstance(data, dict) else "") or r.text[:200]
             raise SiteError(f"Website trả lỗi HTTP {r.status_code}: {detail}", "http")
@@ -67,13 +70,28 @@ class SiteClient:
                                     "overwrite": overwrite})
 
     def upload(self, name: str, content, private: bool) -> str:
-        """content: bytes or an open binary file. Returns the public URL, or the private file URI."""
+        """content: bytes or an open binary file. Returns the public URL, or the private file URI.
+        The site hands out a one-time address and the file goes straight into its storage."""
+        ticket = self._call(60, json={"action": "upload_url", "name": name, "private": private})
+        if not ticket.get("upload_url") or not ticket.get("ref"):
+            raise SiteError("Website không cấp được địa chỉ tải file.", "http")
         mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        data = self._call(900, files={"file": (name, content, mime)}, data={"private": "1" if private else "0"})
-        ref = data.get("file_uri") if private else data.get("file_url")
-        if not ref:
-            raise SiteError("Website không trả về địa chỉ file sau khi tải lên.", "http")
-        return ref
+        try:
+            r = requests.put(ticket["upload_url"], files={"file": (name, content, mime)}, timeout=900)
+        except requests.RequestException as exc:
+            raise SiteError(f"Mất kết nối khi tải file lên ({exc.__class__.__name__}).", "network") from exc
+        if r.status_code == 413 or "exceeded the maximum" in r.text:
+            raise SiteError("File quá lớn (kho của website nhận tối đa 50 MB mỗi file).", "too_large")
+        if r.status_code >= 400:
+            raise SiteError(f"Kho file của website từ chối file (HTTP {r.status_code}): {r.text[:200]}", "http")
+        return ticket["ref"]
+
+    def pending_pdfs(self) -> list[dict]:
+        """Books on the site whose PDF still has to be uploaded again: [{title, file_name}]."""
+        return self._call(60, json={"action": "pending_pdfs"}).get("items") or []
+
+    def attach_pdf(self, file_name: str, file_uri: str) -> list[str]:
+        return self._call(60, json={"action": "attach_pdf", "file_name": file_name, "file_uri": file_uri}).get("attached") or []
 
 
 # ------------------------------------------------------------------ files
@@ -96,6 +114,14 @@ def cover_jpeg(path: str) -> bytes:
 
 def _safe_name(stem: str, ext: str) -> str:
     return (slugify(stem) or "file") + ext
+
+
+def restore_pdf(path: str, client: SiteClient) -> list[str]:
+    """Upload one PDF and attach it to the book(s) on the site that are waiting for that file name."""
+    name = Path(path).name
+    with open(path, "rb") as f:
+        uri = client.upload(_safe_name(Path(path).stem, ".pdf"), f, True)
+    return client.attach_pdf(name, uri)
 
 
 # ------------------------------------------------------------------ publishing

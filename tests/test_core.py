@@ -169,7 +169,7 @@ class PublishTests(unittest.TestCase):
     def setUp(self):
         self.site = FakeSite()
         self.addCleanup(self.site.close)
-        self.client = webstore.SiteClient(self.site.base, "app", TOKEN)
+        self.client = webstore.SiteClient(self.site.api, TOKEN)
         self.td = tempfile.mkdtemp()
         make_folder(self.td, ("The-Book-of-Enoch",))
         eb = scan.scan_folder(self.td)["ebooks"][0]
@@ -181,7 +181,8 @@ class PublishTests(unittest.TestCase):
         rec = self.site.records["Ebook"][0]
         self.assertEqual((web["status"], rec["status"], rec["slug"]), ("draft", "draft", "the-book-of-enoch"))
         self.assertEqual((rec["price"], rec["lemon_squeezy_variant_id"]), (9.99, "2204367"))
-        self.assertTrue(rec["secure_file_uri"].startswith("mp/private/") and rec["cover_image"].startswith("https://"))
+        self.assertRegex(rec["secure_file_uri"], r"^[0-9a-f]{8}_the-book-of-enoch\.pdf$")
+        self.assertIn("/public-files/", rec["cover_image"])
         self.assertEqual(rec["faq"], GOOD["faq"])
         cover, pdf = self.site.files
         self.assertEqual((cover["private"], cover["name"], cover["head"][:2]), (False, "the-book-of-enoch.jpg", b"\xff\xd8"))
@@ -212,14 +213,14 @@ class PublishTests(unittest.TestCase):
 
     def test_errors(self):
         with self.assertRaises(webstore.SiteError) as cm:
-            webstore.SiteClient(self.site.base, "app", "wrong-token-000000000000000").ping()
+            webstore.SiteClient(self.site.api, "wrong-token-000000000000000").ping()
         self.assertEqual(cm.exception.code, "auth")
         with self.assertRaises(webstore.SiteError) as cm:
-            webstore.SiteClient(self.site.base, "app", "").ping()
+            webstore.SiteClient(self.site.api, "").ping()
         self.assertEqual(cm.exception.code, "no_token")
         with self.assertRaises(webstore.SiteError) as cm:
-            webstore.SiteClient(self.site.base + "/nope", "app", TOKEN)._call(5, json={})
-        self.assertIn(cm.exception.code, ("not_deployed", "http"))
+            webstore.SiteClient(self.site.base + "/nope", TOKEN).ping()
+        self.assertEqual(cm.exception.code, "not_deployed")
         self.site.fail_upload = True
         with self.assertRaises(webstore.SiteError) as cm:
             webstore.publish_ebook(self.item, self.cfg, self.client)
@@ -227,6 +228,17 @@ class PublishTests(unittest.TestCase):
         with self.assertRaises(webstore.SiteError) as cm:
             webstore.publish_ebook({**self.item, "listing": None}, self.cfg, self.client)
         self.assertEqual(cm.exception.code, "incomplete")
+
+    def test_restore_pdf_of_a_book_copied_from_the_old_site(self):
+        self.site.records["Ebook"] += [
+            {"id": "a", "title": "Jubilees Part 0", "slug": "j0", "status": "published",
+             "secure_file_uri": "mp/private/6aa80a39/2ee2042ac_The-Book-of-Enoch.pdf"},
+            {"id": "b", "title": "Already fine", "slug": "ok", "status": "published", "secure_file_uri": "0000000a_x.pdf"}]
+        self.assertEqual(self.client.pending_pdfs(), [{"title": "Jubilees Part 0", "file_name": "The-Book-of-Enoch.pdf"}])
+        self.assertEqual(webstore.restore_pdf(self.item["pdf"], self.client), ["Jubilees Part 0"])
+        self.assertRegex(self.site.records["Ebook"][0]["secure_file_uri"], r"^[0-9a-f]{8}_the-book-of-enoch\.pdf$")
+        self.assertEqual((self.site.files[0]["private"], self.site.files[0]["head"]), (True, b"%PDF"))
+        self.assertEqual(self.client.pending_pdfs(), [])
 
     def test_pod(self):
         img = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Img)
@@ -254,7 +266,7 @@ class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.site = FakeSite()
-        storage.save_config({"site_base": cls.site.base})
+        storage.save_config({"site_api_url": cls.site.api})
         cls.srv, cls.url = server.start()
         cls.td = tempfile.mkdtemp()
         make_folder(cls.td)
@@ -302,6 +314,18 @@ class ServerTests(unittest.TestCase):
         item = self.call("/api/item/publish", {"kind": "ebook", "id": eb["id"]})["item"]
         self.assertEqual((item["web_status"], item["slug"]), ("draft", "the-book-of-enoch"))
         self.assertEqual(self.site.records["Ebook"][0]["price"], 12.5)
+
+        # a book copied from the old site: its PDF is in this folder under the original name
+        self.site.records["Ebook"].append({"id": "old", "title": "Old Jubilees", "slug": "old-j", "status": "published",
+                                           "secure_file_uri": "mp/private/6aa80a39/9f1_jubilees_part-1.pdf"})
+        self.site.records["Ebook"].append({"id": "old2", "title": "Not here", "slug": "old-2", "status": "published",
+                                           "secure_file_uri": "mp/private/6aa80a39/9f2_Missing.pdf"})
+        self.assertEqual(self.call("/api/restore/list")["items"], [
+            {"title": "Old Jubilees", "file_name": "jubilees_part-1.pdf", "found": True},
+            {"title": "Not here", "file_name": "Missing.pdf", "found": False}])
+        self.assertEqual(self.call("/api/restore/one", {"file_name": "jubilees_part-1.pdf"})["attached"], ["Old Jubilees"])
+        self.call("/api/restore/one", {"file_name": "Missing.pdf"}, status=400)
+        self.assertEqual([i["file_name"] for i in self.call("/api/restore/list")["items"]], ["Missing.pdf"])
 
         # state survives a restart of the tool (it is stored on disk) and a rescan keeps the work
         again = self.call("/api/ebooks/scan", {"folder": self.td})["ebooks"][1]

@@ -2,7 +2,7 @@
 
 Used by the tests and for trying the tool without touching the real site:
     python tools/fake_site.py 8765        (token: test-token-0123456789abcdefgh)
-then point the tool at it with DNPS_SITE_BASE=http://127.0.0.1:8765
+then start the tool with DNPS_SITE_API=http://127.0.0.1:8765/functions/v1/toolApi
 """
 from __future__ import annotations
 
@@ -15,12 +15,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 TOKEN = "test-token-0123456789abcdefgh"
 REQUIRED = {"Ebook": ("title", "slug", "description", "price", "cover_image"),
             "Product": ("title", "slug", "category", "price", "images", "description", "spring_url")}
+OLD_PDF = re.compile(r"^mp/private/[^/]+/[0-9a-f]+_(.+)$")
 
 
 class FakeSite:
     def __init__(self, port: int = 0):
         self.records: dict[str, list[dict]] = {"Ebook": [], "Product": []}
-        self.files: list[dict] = []
+        self.files: list[dict] = []       # uploaded files, in order
+        self.tickets: dict[str, dict] = {}
         self.fail_upload = False
         site = self
 
@@ -36,30 +38,48 @@ class FakeSite:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def do_PUT(self):  # noqa: N802 - the one-time upload address (the site's file storage)
+                raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                ticket = site.tickets.pop(self.path, None)
+                if ticket is None:
+                    return self._json(400, {"error": "invalid upload token"})
+                if site.fail_upload:
+                    return self._json(413, {"error": "The object exceeded the maximum allowed size"})
+                boundary = (self.headers.get("Content-Type") or "").split("boundary=")[1].encode()
+                part = next(p for p in raw.split(b"--" + boundary) if b'name="file"' in p)
+                data = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0]
+                site.files.append({**ticket, "size": len(data), "head": data[:4]})
+                return self._json(200, {"Key": ticket["ref"]})
+
             def do_POST(self):  # noqa: N802
                 raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                if not self.path.endswith("/functions/toolApi"):
+                if not self.path.endswith("/functions/v1/toolApi"):
                     return self._json(404, {"error": "not found"})
                 if self.headers.get("X-Tool-Token") != TOKEN:
                     return self._json(401, {"error": "Unauthorized"})
-                ctype = self.headers.get("Content-Type") or ""
-                if ctype.startswith("multipart/form-data"):
-                    if site.fail_upload:
-                        return self._json(413, {"error": "too large"})
-                    name = re.search(rb'name="file"; filename="([^"]*)"', raw).group(1).decode()
-                    private = b'name="private"\r\n\r\n1' in raw
-                    boundary = ctype.split("boundary=")[1].encode()
-                    part = next(p for p in raw.split(b"--" + boundary) if b'name="file"' in p)
-                    data = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0]
-                    site.files.append({"name": name, "private": private, "size": len(data), "head": data[:4]})
-                    n = len(site.files)
-                    if private:
-                        return self._json(200, {"file_uri": f"mp/private/app/{n}_{name}"})
-                    return self._json(200, {"file_url": f"https://media.base44.com/images/public/app/{n}_{name}"})
                 body = json.loads(raw or b"{}")
                 action = body.get("action")
                 if action == "ping":
                     return self._json(200, {"ok": True, "site": "Dark Network (giả lập)"})
+                if action == "upload_url":
+                    name = str(body.get("name") or "")
+                    if not re.search(r"\.(pdf|jpe?g|png|webp)$", name, re.I):
+                        return self._json(400, {"error": "Only pdf, jpg, png, webp"})
+                    n = len(site.tickets) + len(site.files) + 1
+                    private = body.get("private") is True
+                    stored = f"{n:08x}_{name}"
+                    ref = stored if private else f"{site.base}/storage/v1/object/public/public-files/{stored}"
+                    site.tickets[f"/upload/{n}"] = {"name": name, "private": private, "ref": ref}
+                    return self._json(200, {"upload_url": f"{site.base}/upload/{n}", "ref": ref})
+                ebooks = site.records["Ebook"]
+                old = lambda r: (OLD_PDF.match(str(r.get("secure_file_uri") or "")) or [None, None])[1]  # noqa: E731
+                if action == "pending_pdfs":
+                    return self._json(200, {"items": [{"title": r["title"], "file_name": old(r)} for r in ebooks if old(r)]})
+                if action == "attach_pdf":
+                    hit = [r for r in ebooks if (old(r) or "").lower() == str(body.get("file_name") or "").lower()]
+                    for r in hit:
+                        r["secure_file_uri"] = body.get("file_uri")
+                    return self._json(200, {"attached": [r["title"] for r in hit]})
                 entity = body.get("entity")
                 if entity not in site.records:
                     return self._json(400, {"error": "Unknown entity"})
@@ -87,6 +107,7 @@ class FakeSite:
 
         self.srv = ThreadingHTTPServer(("127.0.0.1", port), H)
         self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+        self.api = f"{self.base}/functions/v1/toolApi"
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
     def close(self):
@@ -96,5 +117,5 @@ class FakeSite:
 
 if __name__ == "__main__":
     s = FakeSite(int(sys.argv[1]) if len(sys.argv) > 1 else 8765)
-    print("fake site at", s.base, "token", TOKEN)
+    print("fake site at", s.api, "token", TOKEN)
     threading.Event().wait()
