@@ -120,7 +120,7 @@ def restore_pdf(path: str, client: SiteClient) -> list[str]:
     """Upload one PDF and attach it to the book(s) on the site that are waiting for that file name."""
     name = Path(path).name
     with open(path, "rb") as f:
-        uri = client.upload(_safe_name(Path(path).stem, ".pdf"), f, True)
+        uri = client.upload(name, f, True)   # buyers download it under this, its own name
     return client.attach_pdf(name, uri)
 
 
@@ -147,7 +147,7 @@ def publish_ebook(item: dict, cfg: dict, client: SiteClient, overwrite: bool = F
     sig = file_sig(item["pdf"])
     if web.get("pdf_sig") != sig:
         with open(item["pdf"], "rb") as f:
-            web["file_uri"] = client.upload(_safe_name(Path(item["pdf"]).stem, ".pdf"), f, True)
+            web["file_uri"] = client.upload(Path(item["pdf"]).name, f, True)   # keeps its own name
         web["pdf_sig"] = sig
 
     data = {"title": item["title"], "slug": slug, "price": float(item.get("price") or 0),

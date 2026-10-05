@@ -181,12 +181,12 @@ class PublishTests(unittest.TestCase):
         rec = self.site.records["Ebook"][0]
         self.assertEqual((web["status"], rec["status"], rec["slug"]), ("draft", "draft", "the-book-of-enoch"))
         self.assertEqual((rec["price"], rec["lemon_squeezy_variant_id"]), (9.99, "2204367"))
-        self.assertRegex(rec["secure_file_uri"], r"^[0-9a-f]{8}_the-book-of-enoch\.pdf$")
+        self.assertRegex(rec["secure_file_uri"], r"^[0-9a-f]{8}_The-Book-of-Enoch\.pdf$")
         self.assertIn("/public-files/", rec["cover_image"])
         self.assertEqual(rec["faq"], GOOD["faq"])
         cover, pdf = self.site.files
         self.assertEqual((cover["private"], cover["name"], cover["head"][:2]), (False, "the-book-of-enoch.jpg", b"\xff\xd8"))
-        self.assertEqual((pdf["private"], pdf["name"], pdf["head"]), (True, "the-book-of-enoch.pdf", b"%PDF"))
+        self.assertEqual((pdf["private"], pdf["name"], pdf["head"]), (True, "The-Book-of-Enoch.pdf", b"%PDF"))
 
     def test_republish_updates_without_reupload_and_keeps_status(self):
         webstore.publish_ebook(self.item, self.cfg, self.client)
@@ -236,7 +236,7 @@ class PublishTests(unittest.TestCase):
             {"id": "b", "title": "Already fine", "slug": "ok", "status": "published", "secure_file_uri": "0000000a_x.pdf"}]
         self.assertEqual(self.client.pending_pdfs(), [{"title": "Jubilees Part 0", "file_name": "The-Book-of-Enoch.pdf"}])
         self.assertEqual(webstore.restore_pdf(self.item["pdf"], self.client), ["Jubilees Part 0"])
-        self.assertRegex(self.site.records["Ebook"][0]["secure_file_uri"], r"^[0-9a-f]{8}_the-book-of-enoch\.pdf$")
+        self.assertRegex(self.site.records["Ebook"][0]["secure_file_uri"], r"^[0-9a-f]{8}_The-Book-of-Enoch\.pdf$")
         self.assertEqual((self.site.files[0]["private"], self.site.files[0]["head"]), (True, b"%PDF"))
         self.assertEqual(self.client.pending_pdfs(), [])
 

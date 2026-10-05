@@ -132,7 +132,7 @@ def main() -> int:
                 shot("02_ebook_scanned")
                 page.click('[data-act="restore"]')
                 page.wait_for_function("!document.querySelector('[data-act=restore]')", timeout=30000)
-                assert site.records["Ebook"][0]["secure_file_uri"].endswith("the-ethiopian-canon.pdf"), site.records["Ebook"][0]
+                assert site.records["Ebook"][0]["secure_file_uri"].endswith("The-Ethiopian-Canon.pdf"), site.records["Ebook"][0]
                 assert page.locator(".note.info").count() == 1   # one book is still waiting: its file is not in this folder
                 site.records["Ebook"].clear()
                 page.click('[data-act="scan"]')
