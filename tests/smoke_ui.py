@@ -90,6 +90,18 @@ site.orders = [
      "currency": "USD", "buyer": "account", "total": 2699, "items": ["The Book of Enoch: A Black Reader's Study Edition - Full Version"]},
     {"order_id": "9658343", "date": "2026-10-05T07:05:00Z", "email": "test@example.com", "status": "refunded", "currency": "USD", "buyer": "account",
      "total": 2699, "items": ["The Book of Enoch: A Black Reader's Study Edition - Full Version"]}]
+site.chats = [
+    {"id": "c1", "visitor_name": "", "guest_key": "guestkey-7f3a9c", "user_id": None, "unread_for_admin": True, "last_message_at": "2026-10-07T16:02:00Z",
+     "last_message_preview": "Hi, I paid for the Ethiopian Canon but I can't find the download link anywhere on the page",
+     "messages": [{"id": "m1", "sender_role": "visitor", "created_date": "2026-10-07T16:01:00Z", "body": "Hi, I paid for the Ethiopian Canon"},
+                  {"id": "m2", "sender_role": "visitor", "created_date": "2026-10-07T16:02:00Z",
+                   "body": "but I can't find the download link anywhere on the page. A-very-long-unbroken-word-to-check-wrapping-" + "x" * 80}]},
+    {"id": "c2", "visitor_name": "Grace Okafor", "guest_key": None, "user_id": "u1", "unread_for_admin": True, "last_message_at": "2026-10-07T09:20:00Z",
+     "last_message_preview": "Do you ship the mugs to Canada?",
+     "messages": [{"id": "m3", "sender_role": "visitor", "created_date": "2026-10-07T09:20:00Z", "body": "Do you ship the mugs to Canada?"}]},
+    {"id": "c3", "visitor_name": "", "guest_key": "guestkey-11aa22", "user_id": None, "unread_for_admin": False, "last_message_at": "2026-10-05T11:00:00Z",
+     "last_message_preview": "You're welcome!", "messages": [{"id": "m4", "sender_role": "visitor", "created_date": "2026-10-05T10:58:00Z", "body": "Thanks"},
+                                                    {"id": "m5", "sender_role": "admin", "created_date": "2026-10-05T11:00:00Z", "body": "You're welcome!"}]}]
 _today = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=7)
 site.traffic = {"summary": {"views_today": 31, "visitors_today": 14, "views_7d": 240, "visitors_7d": 96, "views_30d": 811, "visitors_30d": 342},
                 "days": [{"day": (_today - datetime.timedelta(days=i)).strftime("%Y-%m-%d"), "views": 40 - i, "visitors": (14 if i == 0 else (i * 7) % 23)} for i in range(0, 30, 1) if i % 6 != 5],
@@ -210,6 +222,24 @@ def main() -> int:
                 assert [r["category"] for r in site.records["Product"]] == ["Mugs", "Apparel"], site.records["Product"]
                 page.wait_for_timeout(4500)
             shot("07_pod")
+            page.click('[data-nav="chat"]')
+            page.wait_for_selector(".conv")
+            if first:
+                assert page.inner_text('[data-nav="chat"] .count') == "2"
+                shot("07a_chat_list")
+                page.locator(".conv").first.click()
+                page.wait_for_selector(".bubble")
+                page.fill("#chat-reply", "Thank you for your message.\nYou can download it from My Account.")
+                page.wait_for_timeout(5600)   # a background refresh must not wipe the draft
+                assert page.input_value("#chat-reply").startswith("Thank you"), "draft lost on refresh"
+                page.press("#chat-reply", "Enter")
+                page.wait_for_function("document.querySelectorAll('.bubble.mine').length === 1")
+                assert site.chats[0]["messages"][-1]["body"].startswith("Thank you") and page.input_value("#chat-reply") == ""
+                assert page.inner_text('[data-nav="chat"] .count') == "1"
+            else:
+                page.locator(".conv").nth(1).click()
+                page.wait_for_selector(".bubble")
+            shot("07a_chat")
             page.click('[data-nav="orders"]')
             page.wait_for_selector(".item.order")
             assert page.locator(".item.order").count() == 3 and "$58.97" in page.inner_text(".stats")

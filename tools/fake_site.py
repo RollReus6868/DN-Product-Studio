@@ -21,6 +21,7 @@ OLD_PDF = re.compile(r"^mp/private/[^/]+/[0-9a-f]+_(.+)$")
 class FakeSite:
     def __init__(self, port: int = 0):
         self.records: dict[str, list[dict]] = {"Ebook": [], "Product": []}
+        self.chats: list[dict] = []       # conversations, each with its "messages"
         self.orders: list[dict] = []      # what the "orders" action returns
         self.traffic: dict = {"summary": {}, "days": [], "pages": []}
         self.files: list[dict] = []       # uploaded files, in order
@@ -63,6 +64,23 @@ class FakeSite:
                 action = body.get("action")
                 if action == "ping":
                     return self._json(200, {"ok": True, "site": "Dark Network (giả lập)"})
+                if action == "chat_list":
+                    return self._json(200, {"conversations": [{k: v for k, v in c.items() if k != "messages"} for c in site.chats]})
+                if action in ("chat_thread", "chat_reply"):
+                    conv = next((c for c in site.chats if c["id"] == body.get("conversation_id")), None)
+                    if conv is None:
+                        return self._json(400, {"error": "Missing conversation"})
+                    if action == "chat_thread":
+                        conv["unread_for_admin"] = False
+                        return self._json(200, {"messages": conv["messages"]})
+                    text = str(body.get("body") or "").strip()
+                    if not text:
+                        return self._json(400, {"error": "Missing conversation or message"})
+                    msg = {"id": f"m{len(conv['messages']) + 1}-{conv['id']}", "sender_role": "admin", "sender_name": "Dark Network",
+                           "body": text, "created_date": "2026-10-07T16:30:00Z"}
+                    conv["messages"].append(msg)
+                    conv.update(last_message_preview=text[:140], unread_for_admin=False)
+                    return self._json(200, {"message": msg})
                 if action == "orders":
                     return self._json(200, {"items": site.orders})
                 if action == "traffic":

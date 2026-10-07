@@ -1,7 +1,7 @@
 """Talk to the website (its `toolApi` backend function) and publish drafts.
 
 The site checks a secret token on every call, creates new records as drafts,
-and stores ebook PDFs as private files. Orders and visits are read-only. Nothing here can
+and stores ebook PDFs as private files. Orders and visits are read-only; the customer chat can be read and answered. Nothing here can
 publish or delete.
 """
 from __future__ import annotations
@@ -94,6 +94,17 @@ class SiteClient:
     def traffic(self) -> dict:
         """The site's own visit counter: {summary, days, pages}."""
         return self._call(60, json={"action": "traffic"})
+
+    # ---- customer chat (the same inbox as the website's Admin > Tin nhắn)
+    def chat_list(self) -> list[dict]:
+        return self._call(30, json={"action": "chat_list"}).get("conversations") or []
+
+    def chat_thread(self, conversation_id: str) -> list[dict]:
+        """The messages of one conversation; reading marks the customer's messages as read."""
+        return self._call(30, json={"action": "chat_thread", "conversation_id": conversation_id}).get("messages") or []
+
+    def chat_reply(self, conversation_id: str, body: str) -> dict:
+        return self._call(30, json={"action": "chat_reply", "conversation_id": conversation_id, "body": body}).get("message") or {}
 
     def pending_pdfs(self) -> list[dict]:
         """Books on the site whose PDF still has to be uploaded again: [{title, file_name}]."""

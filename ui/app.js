@@ -14,7 +14,7 @@ const CATEGORIES = ["Apparel", "Wall Art", "Mugs", "Gifts", "Books"];
 const WEB_STATUS = { "": ["muted", "circle-dashed", "Chưa đăng"], draft: ["info", "file-pen-line", "Bản nháp trên web"], published: ["ok", "globe", "Đang bán trên web"] };
 
 const S = { page: "ebook", app: {}, config: {}, hasToken: false, ebooks: [], pods: [], busy: {}, errors: {},
-  notes: null, restore: null, orders: null, traffic: null, podErrors: [], update: null, upd: null, ping: null, running: false };
+  notes: null, restore: null, orders: null, traffic: null, chat: { list: null, active: "", messages: [], error: "", sending: false }, podErrors: [], update: null, upd: null, ping: null, running: false };
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const icon = (name, cls = "") => `<i data-lucide="${name}" class="${cls}"></i>`;
@@ -72,12 +72,12 @@ function applyTheme() {
 }
 
 /* ---------------- sidebar ---------------- */
-const NAV = [["ebook", "book-open", "Ebook"], ["pod", "shirt", "POD (Spring)"], ["orders", "receipt", "Đơn hàng"], ["traffic", "chart-column", "Lượt truy cập"]];
+const NAV = [["ebook", "book-open", "Ebook"], ["pod", "shirt", "POD (Spring)"], ["chat", "message-circle", "Tin nhắn"], ["orders", "receipt", "Đơn hàng"], ["traffic", "chart-column", "Lượt truy cập"]];
 const NAV_BOTTOM = [["guide", "circle-help", "Hướng dẫn"], ["settings", "settings", "Cài đặt"]];
 function renderSidebar() {
   const open = S.config.sidebar_open !== false;
   const item = ([id, ic, label]) => `<button class="nav-item ${S.page === id ? "active" : ""}" data-nav="${id}" title="${label}">
-    ${icon(ic)}<span class="nav-label">${label}</span>${id === "settings" && S.update?.newer ? '<span class="dot" title="Có bản mới"></span>' : ""}</button>`;
+    ${icon(ic)}<span class="nav-label">${label}</span>${id === "settings" && S.update?.newer ? '<span class="dot" title="Có bản mới"></span>' : ""}${id === "chat" && chatUnread() ? `<span class="count" title="Khách đang chờ trả lời">${chatUnread()}</span>` : ""}</button>`;
   const dark = S.config.mode !== "light";
   $("#sidebar").className = `sidebar glass-panel ${open ? "" : "closed"}`;
   $("#sidebar").innerHTML = `
@@ -130,6 +130,58 @@ async function loadSite(what) {   // what: "orders" | "traffic"
   try { S[what] = await api(`/api/${what}`); } catch (e) { S[what] = { ...(S[what] || {}), error: e.message }; }
   delete S.busy[what];
   if (S.page === what) render();
+}
+
+/* ---------------- customer chat ---------------- */
+const CHAT_LIST_MS = 20000, CHAT_THREAD_MS = 5000;
+const chatUnread = () => (S.chat.list || []).filter((c) => c.unread_for_admin).length;
+const chatName = (c) => c.visitor_name || (c.user_id ? "Khách đã đăng nhập" : `Khách ẩn danh${c.guest_key ? " · " + c.guest_key.slice(-6) : ""}`);
+// Runs all the time (also on other pages) so the sidebar shows how many customers are waiting.
+async function pollChatList() {
+  if (S.hasToken) {
+    try {
+      const before = chatUnread(), first = S.chat.list === null;
+      const list = (await api("/api/chat/list")).conversations;
+      const changed = JSON.stringify(list) !== JSON.stringify(S.chat.list);
+      S.chat.list = list; S.chat.error = "";
+      if (!first && chatUnread() > before && S.page !== "chat") toast("info", "Có tin nhắn mới từ khách. Mở mục Tin nhắn để trả lời.");
+      if (changed) render();
+    } catch (e) {
+      if (S.page === "chat" && S.chat.error !== e.message) { S.chat.error = e.message; render(); }
+    }
+  }
+  setTimeout(pollChatList, CHAT_LIST_MS);
+}
+async function loadThread(scroll) {
+  const id = S.chat.active;
+  if (!id) return;
+  try {
+    const messages = (await api("/api/chat/thread", { id })).messages;
+    if (id !== S.chat.active) return;
+    const more = messages.length !== S.chat.messages.length;
+    S.chat.messages = messages;
+    const conv = (S.chat.list || []).find((c) => c.id === id);
+    if (conv) conv.unread_for_admin = false;
+    if (more || scroll) { render(); const box = $("#chat-thread"); if (box) box.scrollTop = box.scrollHeight; }
+  } catch (e) { if (scroll) toast("error", e.message); }
+}
+setInterval(() => { if (S.page === "chat" && S.chat.active && !S.chat.sending) loadThread(false); }, CHAT_THREAD_MS);
+async function sendChat() {
+  const box = $("#chat-reply");
+  const body = box.value.trim();
+  if (!body || S.chat.sending) return;
+  S.chat.sending = true;
+  try {
+    const res = await api("/api/chat/reply", { id: S.chat.active, body });
+    S.chat.messages.push(res.message);
+    const conv = (S.chat.list || []).find((c) => c.id === S.chat.active);
+    if (conv) conv.last_message_preview = body.slice(0, 140);
+    box.value = "";
+  } catch (e) { toast("error", e.message); }
+  S.chat.sending = false;
+  render();
+  const thread = $("#chat-thread"); if (thread) thread.scrollTop = thread.scrollHeight;
+  $("#chat-reply")?.focus();
 }
 
 /* ---------------- pages ---------------- */
@@ -193,6 +245,27 @@ const PAGES = {
       <div class="page-body">${rows || `<div class="empty"><div class="icon-tile">${icon("shirt")}</div><b>Chưa có sản phẩm POD</b>
         <span>Tạo sản phẩm trên Spring trước, rồi dán link của nó vào ô phía trên.</span></div>`}</div>
       ${actionBar("pod")}</div>`;
+  },
+
+  chat() {
+    const c = S.chat;
+    const convs = c.list || [];
+    const active = convs.find((x) => x.id === c.active);
+    const rows = convs.map((x) => `<button class="conv ${x.id === c.active ? "active" : ""}" data-act="chat-open" data-id="${esc(x.id)}">
+      <span class="conv-top"><b>${esc(chatName(x))}</b>${x.unread_for_admin ? '<span class="dot" title="Chưa đọc"></span>' : ""}<small>${esc(when(x.last_message_at))}</small></span>
+      <span class="conv-preview">${esc(x.last_message_preview || "")}</span></button>`).join("");
+    const bubbles = c.messages.map((m) => `<div class="bubble ${m.sender_role === "admin" ? "mine" : ""}"><span>${esc(m.body)}</span><small>${esc(when(m.created_date))}</small></div>`).join("");
+    return `<div class="page">
+      ${header("message-circle", "Tin nhắn", "Khách nhắn ở khung chat trên web. Trả lời tại đây, khách thấy ngay trong khung chat của họ.")}
+      ${c.error ? `<div class="top-block"><div class="note bad">${icon("circle-alert")}<span>${esc(c.error)}</span></div></div>` : ""}
+      <div class="chat">
+        <div class="chat-list">${rows || `<div class="empty"><b>${c.list ? "Chưa có tin nhắn nào" : "Đang tải…"}</b>${c.list ? "<span>Khi khách nhắn trên web, cuộc trò chuyện sẽ hiện ở đây.</span>" : ""}</div>`}</div>
+        <div class="chat-pane">${active ? `
+          <div class="chat-thread" id="chat-thread">${bubbles}</div>
+          <div class="chat-box"><textarea class="textarea grow" id="chat-reply" rows="2" maxlength="2000" placeholder="Viết câu trả lời (Enter để gửi, Shift+Enter xuống dòng)" aria-label="Câu trả lời"></textarea>
+            <button class="btn gradient" data-act="chat-send" aria-label="Gửi">${icon("send")}Gửi</button></div>`
+          : `<div class="empty"><div class="icon-tile">${icon("message-circle")}</div><b>Chọn một cuộc trò chuyện</b><span>Bấm vào tên khách ở cột bên trái để đọc và trả lời.</span></div>`}</div>
+      </div></div>`;
   },
 
   orders() {
@@ -334,11 +407,15 @@ function render() {
   const scroll = body && render.page === S.page ? body.scrollTop : 0;   // a new page starts at the top
   render.page = S.page;
   const keep = {};
-  for (const id of ["folder", "urls"]) if ($("#" + id)) keep[id] = $("#" + id).value;
+  for (const id of ["folder", "urls", "chat-reply"]) if ($("#" + id)) keep[id] = $("#" + id).value;
+  const focused = document.activeElement?.id === "chat-reply" ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+  const threadTop = $("#chat-thread")?.scrollTop;
   renderSidebar();
   $("#main").innerHTML = PAGES[S.page]();
   for (const [id, v] of Object.entries(keep)) if ($("#" + id)) $("#" + id).value = v;
   if ($(".page-body")) $(".page-body").scrollTop = scroll;
+  if (threadTop !== undefined && $("#chat-thread")) $("#chat-thread").scrollTop = threadTop;
+  if (focused && $("#chat-reply")) { $("#chat-reply").focus(); $("#chat-reply").setSelectionRange(...focused); }
   lucide.createIcons();
 }
 
@@ -490,6 +567,8 @@ const ACTIONS = {
   async pick() { try { const r = await api("/api/pick-folder"); if (r.folder) { $("#folder").value = r.folder; scan(r.folder); } } catch (e) { toast("error", e.message); } },
   scan() { scan($("#folder").value); },
   reload(el) { loadSite(el.dataset.what); },
+  "chat-open"(el) { S.chat.active = el.dataset.id; S.chat.messages = []; render(); loadThread(true).then(() => $("#chat-reply")?.focus()); },
+  "chat-send"() { sendChat(); },
   restore() { runRestore(); },
   write(el, row) { openWriter(row.dataset.kind, row.dataset.id); },
   publish(el, row) { publish(row.dataset.kind, row.dataset.id).then((ok) => ok && toast("success", "Đã đăng lên web ở dạng bản nháp.")); },
@@ -548,6 +627,7 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && $("#overlay").innerHTML && !$("#w-reply")?.value) { closeDialog(); writer = null; }
   if (ev.key === "Enter" && ev.target.matches("input[data-field], input[data-config]")) ev.target.blur();
   if (ev.key === "Enter" && ev.target.id === "folder") scan(ev.target.value);
+  if (ev.key === "Enter" && !ev.shiftKey && ev.target.id === "chat-reply") { ev.preventDefault(); sendChat(); }
 });
 
 (async function init() {
@@ -556,4 +636,5 @@ document.addEventListener("keydown", (ev) => {
   render();
   loadRestore();
   checkUpdate(true);
+  pollChatList();
 })();

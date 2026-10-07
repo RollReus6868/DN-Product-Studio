@@ -339,6 +339,19 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.call("/api/orders")["items"], self.site.orders)
         self.assertEqual(self.call("/api/traffic"), self.site.traffic)
 
+    def test_chat_read_and_reply(self):
+        self.site.chats = [{"id": "c1", "visitor_name": "", "guest_key": "guestkey-abc123", "user_id": None, "unread_for_admin": True,
+                            "last_message_at": "2026-10-07T16:00:00Z", "last_message_preview": "Hello",
+                            "messages": [{"id": "m1", "sender_role": "visitor", "body": "Hello", "created_date": "2026-10-07T16:00:00Z"}]}]
+        convs = self.call("/api/chat/list")["conversations"]
+        self.assertEqual((convs[0]["id"], convs[0]["unread_for_admin"]), ("c1", True))
+        self.assertNotIn("messages", convs[0])
+        self.assertEqual([m["body"] for m in self.call("/api/chat/thread", {"id": "c1"})["messages"]], ["Hello"])
+        self.assertFalse(self.call("/api/chat/list")["conversations"][0]["unread_for_admin"])
+        self.call("/api/chat/reply", {"id": "c1", "body": "   "}, status=400)
+        self.assertEqual(self.call("/api/chat/reply", {"id": "c1", "body": " Hi there "})["message"]["body"], "Hi there")
+        self.assertEqual(len(self.site.chats[0]["messages"]), 2)
+
     def test_config_validation(self):
         self.assertEqual(self.call("/api/config", {"shared_variant_id": " 2204367 ", "default_price": "7.5"})["config"]["shared_variant_id"], "2204367")
         self.assertEqual(storage.load_config()["default_price"], 7.5)

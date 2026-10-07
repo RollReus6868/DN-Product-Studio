@@ -307,6 +307,30 @@ def api_traffic(_body: dict) -> dict:
         raise ApiError(str(exc), exc.code) from exc
 
 
+def api_chat_list(_body: dict) -> dict:
+    try:
+        return {"conversations": _client(storage.load_config()).chat_list()}
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
+
+
+def api_chat_thread(body: dict) -> dict:
+    try:
+        return {"messages": _client(storage.load_config()).chat_thread(str(body.get("id") or ""))}
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
+
+
+def api_chat_reply(body: dict) -> dict:
+    text = str(body.get("body") or "").strip()
+    if not text:
+        raise ApiError("Chưa có nội dung tin nhắn.")
+    try:
+        return {"message": _client(storage.load_config()).chat_reply(str(body.get("id") or ""), text)}
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
+
+
 def api_token_generate(_body: dict) -> dict:
     token = secrets.token_urlsafe(36)
     return api_token_set({"token": token})
@@ -391,7 +415,8 @@ ROUTES = {
     "/api/item/prompt": api_item_prompt, "/api/item/reply": api_item_reply,
     "/api/item/listing": api_item_listing, "/api/item/publish": api_item_publish,
     "/api/restore/list": api_restore_list, "/api/restore/one": api_restore_one,
-    "/api/site/ping": api_site_ping, "/api/orders": api_orders, "/api/traffic": api_traffic, "/api/token/generate": api_token_generate,
+    "/api/site/ping": api_site_ping, "/api/orders": api_orders, "/api/traffic": api_traffic,
+    "/api/chat/list": api_chat_list, "/api/chat/thread": api_chat_thread, "/api/chat/reply": api_chat_reply, "/api/token/generate": api_token_generate,
     "/api/token/set": api_token_set, "/api/token/show": api_token_show, "/api/open": api_open,
     "/api/update/check": api_update_check, "/api/update/install": api_update_install,
     "/api/update/progress": api_update_progress,

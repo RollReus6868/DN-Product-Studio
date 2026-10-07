@@ -6,5 +6,5 @@ APP_VERSION, so bump it here (only here) for every release.
 
 APP_NAME = "DN Product Studio"
 APP_ID = "DNProductStudio"         # file / asset prefix, no spaces
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 GITHUB_REPO = "RollReus6868/DN-Product-Studio"   # "owner/repo" — repo must be Public for updates
