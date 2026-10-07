@@ -14,7 +14,7 @@ const CATEGORIES = ["Apparel", "Wall Art", "Mugs", "Gifts", "Books"];
 const WEB_STATUS = { "": ["muted", "circle-dashed", "Chưa đăng"], draft: ["info", "file-pen-line", "Bản nháp trên web"], published: ["ok", "globe", "Đang bán trên web"] };
 
 const S = { page: "ebook", app: {}, config: {}, hasToken: false, ebooks: [], pods: [], busy: {}, errors: {},
-  notes: null, restore: null, podErrors: [], update: null, upd: null, ping: null, running: false };
+  notes: null, restore: null, orders: null, traffic: null, podErrors: [], update: null, upd: null, ping: null, running: false };
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const icon = (name, cls = "") => `<i data-lucide="${name}" class="${cls}"></i>`;
@@ -72,7 +72,7 @@ function applyTheme() {
 }
 
 /* ---------------- sidebar ---------------- */
-const NAV = [["ebook", "book-open", "Ebook"], ["pod", "shirt", "POD (Spring)"]];
+const NAV = [["ebook", "book-open", "Ebook"], ["pod", "shirt", "POD (Spring)"], ["orders", "receipt", "Đơn hàng"], ["traffic", "chart-column", "Lượt truy cập"]];
 const NAV_BOTTOM = [["guide", "circle-help", "Hướng dẫn"], ["settings", "settings", "Cài đặt"]];
 function renderSidebar() {
   const open = S.config.sidebar_open !== false;
@@ -116,6 +116,20 @@ function actionBar(kind) {
       ${icon(S.running ? "loader-circle" : "cloud-upload", S.running ? "spin" : "")}${S.running ? "Đang đăng lên web…" : `Đăng ${ready} sản phẩm lên web (bản nháp)`}</button>
     <span class="muted small" style="max-width:220px">${ready}/${items.length} sản phẩm đã đủ mô tả${kind === "ebook" ? " và ảnh bìa" : ""}</span>
   </div>`;
+}
+
+/* ---------------- orders + traffic (read from the site) ---------------- */
+const ORDER_STATUS = { paid: ["ok", "circle-check", "Đã thanh toán"], refunded: ["bad", "undo-2", "Đã hoàn tiền"],
+  partially_refunded: ["warn", "undo-2", "Hoàn một phần"], pending: ["muted", "clock", "Chờ thanh toán"] };
+const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" }); };
+const stat = (label, value, hint = "") => `<div class="stat"><span>${label}</span><b>${esc(value)}</b>${hint ? `<small>${hint}</small>` : ""}</div>`;
+const refreshBtn = (what) => `<button class="btn outline sm" data-act="reload" data-what="${what}" ${S.busy[what] ? "disabled" : ""}>${icon(S.busy[what] ? "loader-circle" : "refresh-cw", S.busy[what] ? "spin" : "")}Tải lại</button>`;
+const loadNote = (d) => (d?.error ? `<div class="note bad">${icon("circle-alert")}<span>${esc(d.error)}</span></div>` : "");
+async function loadSite(what) {   // what: "orders" | "traffic"
+  S.busy[what] = true; render();
+  try { S[what] = await api(`/api/${what}`); } catch (e) { S[what] = { ...(S[what] || {}), error: e.message }; }
+  delete S.busy[what];
+  if (S.page === what) render();
 }
 
 /* ---------------- pages ---------------- */
@@ -179,6 +193,66 @@ const PAGES = {
       <div class="page-body">${rows || `<div class="empty"><div class="icon-tile">${icon("shirt")}</div><b>Chưa có sản phẩm POD</b>
         <span>Tạo sản phẩm trên Spring trước, rồi dán link của nó vào ô phía trên.</span></div>`}</div>
       ${actionBar("pod")}</div>`;
+  },
+
+  orders() {
+    const o = S.orders;
+    const items = o?.items || [];
+    const paid = items.filter((i) => i.status === "paid");
+    const usd = (cents) => `$${(Number(cents || 0) / 100).toFixed(2)}`;
+    const rows = items.map((it) => {
+      const [cls, ic, label] = ORDER_STATUS[it.status] || ["muted", "circle-dashed", it.status || "Chưa rõ"];
+      return `<div class="item order">
+        <div class="item-main">
+          <b class="order-email">${esc(it.email || "(không có email)")}</b>
+          <div class="item-meta"><span class="chip">${icon("clock")}${esc(when(it.date))}</span><span class="chip">${icon("hash")}${esc(it.order_id)}</span>
+            <span class="chip">${icon("book-open")}${it.items.length} cuốn</span>
+            <span class="chip">${icon(it.buyer === "account" ? "user-check" : "user")}${it.buyer === "account" ? "Có tài khoản" : "Khách vãng lai"}</span></div>
+          <div class="order-books">${it.items.map((t) => `<span>${esc(t)}</span>`).join("")}</div>
+        </div>
+        <div class="item-side"><b class="order-total">${usd(it.total)}</b><span class="pill ${cls}">${icon(ic)}${label}</span></div></div>`;
+    }).join("");
+    return `<div class="page">
+      ${header("receipt", "Đơn hàng", "Các đơn khách đã thanh toán trên web, mới nhất ở trên.", refreshBtn("orders"))}
+      <div class="top-block"><div class="stats">
+        ${stat("Đơn đã thanh toán", paid.length)}
+        ${stat("Doanh thu", usd(paid.reduce((n, i) => n + Number(i.total || 0), 0)), "gồm thuế, chưa trừ phí")}
+        ${stat("Sách đã bán", paid.reduce((n, i) => n + i.items.length, 0))}
+        ${stat("Đơn hoàn tiền", items.filter((i) => i.status === "refunded").length)}
+      </div>${loadNote(o)}</div>
+      <div class="page-body">${rows || (o && !o.error ? `<div class="empty"><div class="icon-tile">${icon("receipt")}</div><b>Chưa có đơn hàng nào</b>
+        <span>Khi có khách mua, đơn sẽ hiện ở đây sau khi bấm Tải lại.</span></div>` : "")}</div></div>`;
+  },
+
+  traffic() {
+    const t = S.traffic;
+    const sum = t?.summary || {};
+    const byDay = Object.fromEntries((t?.days || []).map((d) => [d.day, d]));
+    const days = [];
+    for (let i = 29; i >= 0; i--) {   // every day of the last 30, also the ones without visits
+      const key = new Date(Date.now() + 7 * 3600e3 - i * 86400e3).toISOString().slice(0, 10);   // Vietnam time, like the site
+      days.push({ day: key, views: Number(byDay[key]?.views || 0), visitors: Number(byDay[key]?.visitors || 0) });
+    }
+    const max = Math.max(1, ...days.map((d) => d.visitors));
+    const bars = days.map((d) => `<div class="bar" title="${d.day.slice(8)}/${d.day.slice(5, 7)}: ${d.visitors} khách, ${d.views} lượt xem"><i style="height:${Math.round((d.visitors / max) * 100)}%"></i></div>`).join("");
+    const pages = (t?.pages || []).map((p) => `<div class="page-row"><code>${esc(p.path)}</code><span class="grow"></span><span>${Number(p.visitors)} khách</span><b>${Number(p.views)} lượt xem</b></div>`).join("");
+    const both = (a) => `${Number(a || 0)} khách`;
+    return `<div class="page">
+      ${header("chart-column", "Lượt truy cập", "Số khách vào web do chính website đếm. Không tính lượt của bạn khi đang đăng nhập admin.", refreshBtn("traffic"))}
+      <div class="top-block"><div class="stats">
+        ${stat("Hôm nay", both(sum.visitors_today), `${Number(sum.views_today || 0)} lượt xem trang`)}
+        ${stat("7 ngày qua", both(sum.visitors_7d), `${Number(sum.views_7d || 0)} lượt xem trang`)}
+        ${stat("30 ngày qua", both(sum.visitors_30d), `${Number(sum.views_30d || 0)} lượt xem trang`)}
+      </div>${loadNote(t)}</div>
+      <div class="page-body"><div class="sections wide">
+        <section><div class="section-head"><div class="icon-tile sm">${icon("chart-column")}</div><h2>Khách mỗi ngày, 30 ngày qua</h2></div>
+          <div class="card"><div class="bars">${bars}</div>
+            <div class="row muted small"><span>${days[0].day.slice(8)}/${days[0].day.slice(5, 7)}</span><span class="grow"></span><span>cao nhất ${max} khách/ngày</span><span class="grow"></span><span>hôm nay</span></div></div></section>
+        <section><div class="section-head"><div class="icon-tile sm">${icon("file-text")}</div><h2>Trang được xem nhiều nhất (30 ngày)</h2></div>
+          <div class="card">${pages || '<span class="muted small">Chưa có lượt xem nào được ghi.</span>'}</div></section>
+        <div class="note info">${icon("info")}<span class="grow">Muốn xem khách đến từ đâu, nước nào, dùng thiết bị gì: mở Google Analytics.</span>
+          <button class="btn outline sm" data-act="open" data-url="https://analytics.google.com/">${icon("external-link")}Mở Google Analytics</button></div>
+      </div></div></div>`;
   },
 
   settings() {
@@ -415,6 +489,7 @@ const ACTIONS = {
   async quit() { await api("/api/quit").catch(() => {}); document.body.innerHTML = '<div class="empty" style="height:100%"><b>Tool đã thoát. Bạn có thể đóng tab này.</b></div>'; },
   async pick() { try { const r = await api("/api/pick-folder"); if (r.folder) { $("#folder").value = r.folder; scan(r.folder); } } catch (e) { toast("error", e.message); } },
   scan() { scan($("#folder").value); },
+  reload(el) { loadSite(el.dataset.what); },
   restore() { runRestore(); },
   write(el, row) { openWriter(row.dataset.kind, row.dataset.id); },
   publish(el, row) { publish(row.dataset.kind, row.dataset.id).then((ok) => ok && toast("success", "Đã đăng lên web ở dạng bản nháp.")); },
@@ -453,7 +528,7 @@ const ACTIONS = {
 
 document.addEventListener("click", (ev) => {
   const nav = ev.target.closest("[data-nav]");
-  if (nav) { S.page = nav.dataset.nav; render(); return; }
+  if (nav) { S.page = nav.dataset.nav; render(); if (S.page === "orders" || S.page === "traffic") loadSite(S.page); return; }
   const el = ev.target.closest("[data-act]");
   if (el && !el.disabled && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el, el.closest(".item"), ev);
 });

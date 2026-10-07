@@ -81,6 +81,20 @@ site.records["Ebook"] += [
      "secure_file_uri": "mp/private/6aa80a39/b75b1f850_The-Ethiopian-Canon.pdf"},
     {"id": "o2", "title": "Jubilees - Part 4", "slug": "jubilees-part-4", "status": "published",
      "secure_file_uri": "mp/private/6aa80a39/ceb5bb886_Jubilees_4-Back-Matter.pdf"}]
+import datetime  # noqa: E402
+
+site.orders = [
+    {"order_id": "9712004", "date": "2026-10-07T09:14:00Z", "email": "grace.okafor@example.com", "status": "paid", "currency": "USD", "buyer": "guest",
+     "total": 3198, "items": ["The Ethiopian Canon - Full Version", "Jubilees: Covenant, Sacred Time, and Restoration - Part 0"]},
+    {"order_id": "9711350", "date": "2026-10-06T21:40:00Z", "email": "a-very-long-email-address-for-wrapping-checks@some-long-domain-name.example.org", "status": "paid",
+     "currency": "USD", "buyer": "account", "total": 2699, "items": ["The Book of Enoch: A Black Reader's Study Edition - Full Version"]},
+    {"order_id": "9658343", "date": "2026-10-05T07:05:00Z", "email": "test@example.com", "status": "refunded", "currency": "USD", "buyer": "account",
+     "total": 2699, "items": ["The Book of Enoch: A Black Reader's Study Edition - Full Version"]}]
+_today = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=7)
+site.traffic = {"summary": {"views_today": 31, "visitors_today": 14, "views_7d": 240, "visitors_7d": 96, "views_30d": 811, "visitors_30d": 342},
+                "days": [{"day": (_today - datetime.timedelta(days=i)).strftime("%Y-%m-%d"), "views": 40 - i, "visitors": (14 if i == 0 else (i * 7) % 23)} for i in range(0, 30, 1) if i % 6 != 5],
+                "pages": [{"path": "/", "views": 320, "visitors": 210}, {"path": "/books", "views": 190, "visitors": 120},
+                          {"path": "/books/the-book-of-enoch-a-black-readers-study-edition-full-version", "views": 88, "visitors": 61}]}
 _srv, URL = server.start()
 
 books = Path(tempfile.mkdtemp(prefix="BOOK_"))
@@ -196,6 +210,14 @@ def main() -> int:
                 assert [r["category"] for r in site.records["Product"]] == ["Mugs", "Apparel"], site.records["Product"]
                 page.wait_for_timeout(4500)
             shot("07_pod")
+            page.click('[data-nav="orders"]')
+            page.wait_for_selector(".item.order")
+            assert page.locator(".item.order").count() == 3 and "$58.97" in page.inner_text(".stats")
+            shot("07b_orders")
+            page.click('[data-nav="traffic"]')
+            page.wait_for_selector(".page-row")
+            assert page.locator(".bar").count() == 30 and "14 khách" in page.inner_text(".stats")
+            shot("07c_traffic")
             page.click('[data-nav="settings"]')
             page.click('[data-act="ping"]')
             page.wait_for_selector(".note.ok")

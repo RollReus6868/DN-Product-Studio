@@ -1,7 +1,8 @@
 """Talk to the website (its `toolApi` backend function) and publish drafts.
 
 The site checks a secret token on every call, creates new records as drafts,
-and stores ebook PDFs as private files. Nothing here can publish or delete.
+and stores ebook PDFs as private files. Orders and visits are read-only. Nothing here can
+publish or delete.
 """
 from __future__ import annotations
 
@@ -85,6 +86,14 @@ class SiteClient:
         if r.status_code >= 400:
             raise SiteError(f"Kho file của website từ chối file (HTTP {r.status_code}): {r.text[:200]}", "http")
         return ticket["ref"]
+
+    def orders(self) -> list[dict]:
+        """One row per order, newest first: order_id, date, email, status, total (cents), currency, buyer, items."""
+        return self._call(60, json={"action": "orders"}).get("items") or []
+
+    def traffic(self) -> dict:
+        """The site's own visit counter: {summary, days, pages}."""
+        return self._call(60, json={"action": "traffic"})
 
     def pending_pdfs(self) -> list[dict]:
         """Books on the site whose PDF still has to be uploaded again: [{title, file_name}]."""

@@ -21,6 +21,8 @@ OLD_PDF = re.compile(r"^mp/private/[^/]+/[0-9a-f]+_(.+)$")
 class FakeSite:
     def __init__(self, port: int = 0):
         self.records: dict[str, list[dict]] = {"Ebook": [], "Product": []}
+        self.orders: list[dict] = []      # what the "orders" action returns
+        self.traffic: dict = {"summary": {}, "days": [], "pages": []}
         self.files: list[dict] = []       # uploaded files, in order
         self.tickets: dict[str, dict] = {}
         self.fail_upload = False
@@ -61,6 +63,10 @@ class FakeSite:
                 action = body.get("action")
                 if action == "ping":
                     return self._json(200, {"ok": True, "site": "Dark Network (giả lập)"})
+                if action == "orders":
+                    return self._json(200, {"items": site.orders})
+                if action == "traffic":
+                    return self._json(200, site.traffic)
                 if action == "upload_url":
                     name = str(body.get("name") or "")
                     if not re.search(r"\.(pdf|jpe?g|png|webp)$", name, re.I):

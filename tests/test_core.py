@@ -331,6 +331,14 @@ class ServerTests(unittest.TestCase):
         again = self.call("/api/ebooks/scan", {"folder": self.td})["ebooks"][1]
         self.assertEqual((again["has_listing"], again["web_status"], again["price"], again["pages"]), (True, "draft", 12.5, 1))
 
+    def test_orders_and_traffic_are_passed_through(self):
+        self.site.orders = [{"order_id": "9001", "date": "2026-10-07T03:00:00Z", "email": "a@b.c", "status": "paid",
+                             "currency": "USD", "buyer": "guest", "total": 3198, "items": ["Book 1", "Book 2"]}]
+        self.site.traffic = {"summary": {"visitors_today": 2, "views_today": 5}, "days": [{"day": "2026-10-07", "views": 5, "visitors": 2}],
+                             "pages": [{"path": "/books", "views": 3, "visitors": 2}]}
+        self.assertEqual(self.call("/api/orders")["items"], self.site.orders)
+        self.assertEqual(self.call("/api/traffic"), self.site.traffic)
+
     def test_config_validation(self):
         self.assertEqual(self.call("/api/config", {"shared_variant_id": " 2204367 ", "default_price": "7.5"})["config"]["shared_variant_id"], "2204367")
         self.assertEqual(storage.load_config()["default_price"], 7.5)

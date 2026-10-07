@@ -193,6 +193,22 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .progress { height: 8px; border-radius: 99px; background: hsl(var(--muted)); overflow: hidden; }
 .progress i { display: block; height: 100%; border-radius: 99px; transition: width .3s; background: linear-gradient(90deg, hsl(var(--gradient-from)), hsl(var(--gradient-via)), hsl(var(--gradient-to))); }
 
+/* ---------- orders / traffic ---------- */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: calc(var(--radius) + 2px); background: hsl(var(--muted) / .3); min-width: 0; }
+.stat span, .stat small { font-size: 12px; color: hsl(var(--muted-foreground)); font-weight: 600; }
+.stat b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.order-email { font-size: 14px; overflow-wrap: anywhere; }
+.order-books { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: hsl(var(--muted-foreground)); overflow-wrap: anywhere; }
+.order-total { font-size: 16px; font-variant-numeric: tabular-nums; }
+.sections.wide { max-width: none; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 140px; }
+.bar { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 0; border-radius: 4px; background: hsl(var(--muted) / .35); }
+.bar i { display: block; width: 100%; min-height: 2px; border-radius: 4px; background: linear-gradient(180deg, hsl(var(--primary)), hsl(var(--gradient-from))); }
+.bar:hover i { filter: brightness(1.2); }
+.page-row { display: flex; align-items: center; gap: 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.page-row span { color: hsl(var(--muted-foreground)); white-space: nowrap; } .page-row b { white-space: nowrap; }
+
 /* ---------- dialog / toast ---------- */
 .overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / .45); backdrop-filter: blur(3px); animation: fade .15s; }
 @keyframes fade { from { opacity: 0; } }
