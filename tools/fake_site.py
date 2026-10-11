@@ -51,7 +51,8 @@ class FakeSite:
                 boundary = (self.headers.get("Content-Type") or "").split("boundary=")[1].encode()
                 part = next(p for p in raw.split(b"--" + boundary) if b'name="file"' in p)
                 data = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0]
-                site.files.append({**ticket, "size": len(data), "head": data[:4]})
+                site.files.append({**ticket, "size": len(data), "head": data[:4],
+                                   "cache_field": b'name="cacheControl"\r\n\r\n31536000' in raw})
                 return self._json(200, {"Key": ticket["ref"]})
 
             def do_POST(self):  # noqa: N802

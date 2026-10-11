@@ -187,6 +187,12 @@ class PublishTests(unittest.TestCase):
         cover, pdf = self.site.files
         self.assertEqual((cover["private"], cover["name"], cover["head"][:2]), (False, "the-book-of-enoch.jpg", b"\xff\xd8"))
         self.assertEqual((pdf["private"], pdf["name"], pdf["head"]), (True, "The-Book-of-Enoch.pdf", b"%PDF"))
+        self.assertTrue(cover["cache_field"], "uploads ask browsers to keep the file for a year")
+
+    def test_cover_is_shrunk_to_the_size_the_site_shows(self):
+        from PIL import Image
+        with Image.open(io.BytesIO(webstore.cover_jpeg(self.item["cover"], webstore.COVER_BOX))) as im:
+            self.assertLessEqual((im.width, im.height), webstore.COVER_BOX)
 
     def test_republish_updates_without_reupload_and_keeps_status(self):
         webstore.publish_ebook(self.item, self.cfg, self.client)

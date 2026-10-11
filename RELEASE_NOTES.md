@@ -1,5 +1,10 @@
-# DN Product Studio 1.3.0
+# DN Product Studio 1.3.1
 
+- **Ảnh bìa ebook nhẹ hơn**: tool nén bìa còn khoảng 150 KB (trước là khoảng 350 KB) trước khi tải lên, vẫn nét trên web.
+- Ảnh tải lên được trình duyệt của khách lưu lại 1 năm, khách quay lại không phải tải lại. Hai thay đổi này giúp website tốn ít băng thông Supabase hơn.
+- Ảnh sản phẩm POD giữ kích thước như cũ.
+
+Từ bản 1.3.0:
 - **Tin nhắn** (mục mới): khách nhắn ở khung chat trên web sẽ hiện trong tool. Bấm vào tên khách để đọc, gõ câu trả lời rồi Enter để gửi; khách thấy ngay trong khung chat của họ.
 - Thanh bên trái hiện **số khách đang chờ trả lời**. Khi có tin mới lúc bạn đang ở mục khác, tool hiện thông báo ở góc trên.
 - Đây cùng là hộp thư với Admin › Tin nhắn trên web: trả lời ở đâu cũng được.

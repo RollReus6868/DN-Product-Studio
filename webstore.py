@@ -78,7 +78,9 @@ class SiteClient:
             raise SiteError("Website không cấp được địa chỉ tải file.", "http")
         mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
         try:
-            r = requests.put(ticket["upload_url"], files={"file": (name, content, mime)}, timeout=900)
+            # file names are unique, so browsers may keep them for a year (saves the site's bandwidth)
+            r = requests.put(ticket["upload_url"], data={"cacheControl": "31536000"},
+                             files={"file": (name, content, mime)}, timeout=900)
         except requests.RequestException as exc:
             raise SiteError(f"Mất kết nối khi tải file lên ({exc.__class__.__name__}).", "network") from exc
         if r.status_code == 413 or "exceeded the maximum" in r.text:
@@ -120,13 +122,17 @@ def file_sig(path: str) -> str:
     return f"{st.st_size}-{st.st_mtime_ns}"
 
 
-def cover_jpeg(path: str) -> bytes:
-    """Web-ready cover: RGB JPEG, at most 1000x1500 (a 3 MB PNG becomes ~350 KB)."""
+COVER_BOX = (640, 960)
+
+
+def cover_jpeg(path: str, box: tuple[int, int] = (1000, 1500)) -> bytes:
+    """Web-ready picture: RGB JPEG no larger than box. Book covers use COVER_BOX
+    (a 3 MB PNG becomes ~150 KB), which is twice the size the site shows them at."""
     from PIL import Image
 
     with Image.open(path) as im:
         im = im.convert("RGB")
-        im.thumbnail((1000, 1500))
+        im.thumbnail(box)
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=86, progressive=True, optimize=True)
         return buf.getvalue()
@@ -162,7 +168,7 @@ def publish_ebook(item: dict, cfg: dict, client: SiteClient, overwrite: bool = F
 
     sig = file_sig(item["cover"])
     if web.get("cover_sig") != sig:
-        web["cover_url"] = client.upload(_safe_name(Path(item["cover"]).stem, ".jpg"), cover_jpeg(item["cover"]), False)
+        web["cover_url"] = client.upload(_safe_name(Path(item["cover"]).stem, ".jpg"), cover_jpeg(item["cover"], COVER_BOX), False)
         web["cover_sig"] = sig
     sig = file_sig(item["pdf"])
     if web.get("pdf_sig") != sig:
