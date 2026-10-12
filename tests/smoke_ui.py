@@ -226,6 +226,13 @@ def main() -> int:
             page.wait_for_selector(".conv")
             if first:
                 assert page.inner_text('[data-nav="chat"] .count') == "2"
+                # orders already on the site at first start are not "new"; one that arrives later is
+                assert not page.locator('[data-nav="orders"] .count').count() and storage.load_config()["orders_seen"] == "2026-10-07T09:14:00Z"
+                site.orders.insert(0, {"order_id": "9713001", "date": "2026-10-08T02:30:00Z", "email": "new@example.com", "status": "refunded",
+                                       "currency": "USD", "buyer": "guest", "total": 1299, "items": ["Jubilees - Part 4"]})
+                page.evaluate("pollOrders()")
+                page.wait_for_selector('[data-nav="orders"] .count')
+                assert page.inner_text('[data-nav="orders"] .count') == "1"
                 shot("07a_chat_list")
                 page.locator(".conv").first.click()
                 page.wait_for_selector(".bubble")
@@ -242,7 +249,9 @@ def main() -> int:
             shot("07a_chat")
             page.click('[data-nav="orders"]')
             page.wait_for_selector(".item.order")
-            assert page.locator(".item.order").count() == 3 and "$58.97" in page.inner_text(".stats")
+            assert page.locator(".item.order").count() == len(site.orders) and "$58.97" in page.inner_text(".stats")
+            page.wait_for_function("!document.querySelector('[data-nav=orders] .count')")   # seen: the badge goes away and stays away
+            assert storage.load_config()["orders_seen"] == site.orders[0]["date"]
             shot("07b_orders")
             page.click('[data-nav="traffic"]')
             page.wait_for_selector(".page-row")

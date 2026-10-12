@@ -77,7 +77,7 @@ const NAV_BOTTOM = [["guide", "circle-help", "Hướng dẫn"], ["settings", "se
 function renderSidebar() {
   const open = S.config.sidebar_open !== false;
   const item = ([id, ic, label]) => `<button class="nav-item ${S.page === id ? "active" : ""}" data-nav="${id}" title="${label}">
-    ${icon(ic)}<span class="nav-label">${label}</span>${id === "settings" && S.update?.newer ? '<span class="dot" title="Có bản mới"></span>' : ""}${id === "chat" && chatUnread() ? `<span class="count" title="Khách đang chờ trả lời">${chatUnread()}</span>` : ""}</button>`;
+    <span class="nav-icon">${icon(ic)}${id === "chat" ? badge(chatUnread(), "khách đang chờ trả lời") : id === "orders" ? badge(ordersNew(), "đơn hàng mới") : ""}</span><span class="nav-label">${label}</span>${id === "settings" && S.update?.newer ? '<span class="dot" title="Có bản mới"></span>' : ""}</button>`;
   const dark = S.config.mode !== "light";
   $("#sidebar").className = `sidebar glass-panel ${open ? "" : "closed"}`;
   $("#sidebar").innerHTML = `
@@ -129,7 +129,37 @@ async function loadSite(what) {   // what: "orders" | "traffic"
   S.busy[what] = true; render();
   try { S[what] = await api(`/api/${what}`); } catch (e) { S[what] = { ...(S[what] || {}), error: e.message }; }
   delete S.busy[what];
+  if (what === "orders") await markOrdersSeen();
   if (S.page === what) render();
+}
+const badge = (n, title) => (n ? `<span class="count" title="${n} ${title}">${n > 99 ? "99+" : n}</span>` : "");
+
+/* New orders = newer than the newest one the owner has seen on the Orders page (kept in config). */
+const ORDERS_MS = 60000;
+const time = (iso) => new Date(iso).getTime() || 0;
+const ordersNew = () => (S.config.orders_seen ? (S.orders?.items || []).filter((o) => time(o.date) > time(S.config.orders_seen)).length : 0);
+async function markOrdersSeen() {
+  const items = S.orders?.items;
+  if (!items || (S.config.orders_seen && S.page !== "orders")) return;   // first run: what is already there is not "new"
+  const newest = items.reduce((a, o) => (time(o.date) > time(a) ? o.date : a), S.config.orders_seen || "");
+  if (newest && newest !== S.config.orders_seen) {
+    try { setState(await api("/api/config", { orders_seen: newest })); } catch (e) { S.config.orders_seen = newest; }
+    render();
+  }
+}
+// Runs all the time so the sidebar shows new orders even when the owner is on another page.
+async function pollOrders() {
+  if (S.hasToken && !S.busy.orders) {
+    try {
+      const before = ordersNew(), data = await api("/api/orders");
+      const changed = JSON.stringify(data.items) !== JSON.stringify(S.orders?.items);
+      S.orders = data;
+      await markOrdersSeen();
+      if (ordersNew() > before && S.page !== "orders") toast("info", "Có đơn hàng mới. Mở mục Đơn hàng để xem.");
+      if (changed) render();
+    } catch (e) { /* shown when the owner opens the Orders page */ }
+  }
+  setTimeout(pollOrders, ORDERS_MS);
 }
 
 /* ---------------- customer chat ---------------- */
@@ -607,7 +637,7 @@ const ACTIONS = {
 
 document.addEventListener("click", (ev) => {
   const nav = ev.target.closest("[data-nav]");
-  if (nav) { S.page = nav.dataset.nav; render(); if (S.page === "orders" || S.page === "traffic") loadSite(S.page); return; }
+  if (nav) { S.page = nav.dataset.nav; render(); if (S.page === "orders") markOrdersSeen(); if (S.page === "orders" || S.page === "traffic") loadSite(S.page); return; }
   const el = ev.target.closest("[data-act]");
   if (el && !el.disabled && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el, el.closest(".item"), ev);
 });
@@ -637,4 +667,5 @@ document.addEventListener("keydown", (ev) => {
   loadRestore();
   checkUpdate(true);
   pollChatList();
+  pollOrders();
 })();

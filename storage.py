@@ -18,6 +18,7 @@ DEFAULTS = {
     "theme": "gold",
     "mode": "dark",
     "sidebar_open": True,
+    "orders_seen": "",   # date of the newest order the owner has seen (for the red badge)
 }
 _KEYRING_USER = "tool_token"
 _lock = threading.RLock()

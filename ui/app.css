@@ -194,8 +194,6 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .progress i { display: block; height: 100%; border-radius: 99px; transition: width .3s; background: linear-gradient(90deg, hsl(var(--gradient-from)), hsl(var(--gradient-via)), hsl(var(--gradient-to))); }
 
 /* ---------- chat ---------- */
-.nav-item .count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; display: grid; place-items: center; background: hsl(var(--bad)); color: #fff; font-size: 11px; font-weight: 800; }
-.sidebar.closed .nav-item .count { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; }
 .chat { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 12px 24px 16px; }
 .chat-list { width: 270px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .conv { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 10px 12px; border-radius: calc(var(--radius) + 2px); border: 1px solid hsl(var(--border) / .6); background: hsl(var(--card) / .5); color: inherit; cursor: pointer; font: inherit; min-width: 0; }
@@ -253,3 +251,6 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
   .divider { margin: 0 16px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+.nav-icon { position: relative; display: grid; place-items: center; flex: none; }
+.nav-icon .count { position: absolute; top: -8px; right: -10px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; display: grid; place-items: center;
+  background: #e5242b; color: #fff; font-size: 10.5px; font-weight: 800; line-height: 1; box-shadow: 0 0 0 2px hsl(var(--background)); pointer-events: none; }

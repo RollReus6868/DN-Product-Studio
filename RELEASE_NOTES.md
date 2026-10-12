@@ -1,5 +1,10 @@
-# DN Product Studio 1.3.1
+# DN Product Studio 1.3.2
 
+- **Huy hiệu đỏ trên icon** như thông báo trên điện thoại: icon **Tin nhắn** hiện số khách đang chờ trả lời, icon **Đơn hàng** hiện số đơn mới. Thu gọn thanh bên vẫn thấy.
+- Tool tự kiểm tra đơn mới mỗi phút, kể cả khi bạn đang ở mục khác, và hiện thông báo ở góc trên khi có đơn mới.
+- Mở mục Đơn hàng là số đơn mới tự về 0. Lần đầu mở bản này, các đơn cũ không tính là mới.
+
+Từ bản 1.3.1:
 - **Ảnh bìa ebook nhẹ hơn**: tool nén bìa còn khoảng 150 KB (trước là khoảng 350 KB) trước khi tải lên, vẫn nét trên web.
 - Ảnh tải lên được trình duyệt của khách lưu lại 1 năm, khách quay lại không phải tải lại. Hai thay đổi này giúp website tốn ít băng thông Supabase hơn.
 - Ảnh sản phẩm POD giữ kích thước như cũ.
