@@ -93,9 +93,10 @@ class SiteClient:
         """One row per order, newest first: order_id, date, email, status, total (cents), currency, buyer, items."""
         return self._call(60, json={"action": "orders"}).get("items") or []
 
-    def traffic(self) -> dict:
-        """The site's own visit counter: {summary, days, pages}."""
-        return self._call(60, json={"action": "traffic"})
+    def analytics(self, days: int) -> dict:
+        """The site's own statistics for the last 7 / 28 / 90 days: visits (like Google Analytics),
+        cart and checkouts, email sign-ups. See tool_analytics in the website's migrations."""
+        return self._call(60, json={"action": "analytics", "days": days})
 
     # ---- customer chat (the same inbox as the website's Admin > Tin nhắn)
     def chat_list(self) -> list[dict]:

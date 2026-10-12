@@ -14,7 +14,7 @@ const CATEGORIES = ["Apparel", "Wall Art", "Mugs", "Gifts", "Books"];
 const WEB_STATUS = { "": ["muted", "circle-dashed", "Chưa đăng"], draft: ["info", "file-pen-line", "Bản nháp trên web"], published: ["ok", "globe", "Đang bán trên web"] };
 
 const S = { page: "ebook", app: {}, config: {}, hasToken: false, ebooks: [], pods: [], busy: {}, errors: {},
-  notes: null, restore: null, orders: null, traffic: null, chat: { list: null, active: "", messages: [], error: "", sending: false }, podErrors: [], update: null, upd: null, ping: null, running: false };
+  notes: null, restore: null, orders: null, analytics: null, anDays: 7, chat: { list: null, active: "", messages: [], error: "", sending: false }, podErrors: [], update: null, upd: null, ping: null, running: false };
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const icon = (name, cls = "") => `<i data-lucide="${name}" class="${cls}"></i>`;
@@ -72,7 +72,8 @@ function applyTheme() {
 }
 
 /* ---------------- sidebar ---------------- */
-const NAV = [["ebook", "book-open", "Ebook"], ["pod", "shirt", "POD (Spring)"], ["chat", "message-circle", "Tin nhắn"], ["orders", "receipt", "Đơn hàng"], ["traffic", "chart-column", "Lượt truy cập"]];
+const NAV = [["ebook", "book-open", "Ebook"], ["pod", "shirt", "POD (Spring)"], ["chat", "message-circle", "Tin nhắn"], ["orders", "receipt", "Đơn hàng"], ["cart", "shopping-cart", "Giỏ & thanh toán"],
+  ["analytics", "chart-column", "Phân tích"], ["emails", "mail", "Email đăng ký"]];
 const NAV_BOTTOM = [["guide", "circle-help", "Hướng dẫn"], ["settings", "settings", "Cài đặt"]];
 function renderSidebar() {
   const open = S.config.sidebar_open !== false;
@@ -118,14 +119,14 @@ function actionBar(kind) {
   </div>`;
 }
 
-/* ---------------- orders + traffic (read from the site) ---------------- */
+/* ---------------- orders + statistics (read from the site) ---------------- */
 const ORDER_STATUS = { paid: ["ok", "circle-check", "Đã thanh toán"], refunded: ["bad", "undo-2", "Đã hoàn tiền"],
   partially_refunded: ["warn", "undo-2", "Hoàn một phần"], pending: ["muted", "clock", "Chờ thanh toán"] };
 const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" }); };
 const stat = (label, value, hint = "") => `<div class="stat"><span>${label}</span><b>${esc(value)}</b>${hint ? `<small>${hint}</small>` : ""}</div>`;
 const refreshBtn = (what) => `<button class="btn outline sm" data-act="reload" data-what="${what}" ${S.busy[what] ? "disabled" : ""}>${icon(S.busy[what] ? "loader-circle" : "refresh-cw", S.busy[what] ? "spin" : "")}Tải lại</button>`;
 const loadNote = (d) => (d?.error ? `<div class="note bad">${icon("circle-alert")}<span>${esc(d.error)}</span></div>` : "");
-async function loadSite(what) {   // what: "orders" | "traffic"
+async function loadSite(what) {   // what: "orders"
   S.busy[what] = true; render();
   try { S[what] = await api(`/api/${what}`); } catch (e) { S[what] = { ...(S[what] || {}), error: e.message }; }
   delete S.busy[what];
@@ -160,6 +161,67 @@ async function pollOrders() {
     } catch (e) { /* shown when the owner opens the Orders page */ }
   }
   setTimeout(pollOrders, ORDERS_MS);
+}
+
+/* ---------------- statistics: Phân tích, Giỏ & thanh toán, Email đăng ký (one call feeds all three) ---------------- */
+const AN_PAGES = ["analytics", "cart", "emails"];
+async function loadAnalytics(quiet = false) {
+  if (S.busy.analytics) return;
+  S.busy.analytics = true;
+  if (!quiet) render();
+  try { S.analytics = await api("/api/analytics", { days: S.anDays }); } catch (e) { S.analytics = { ...(S.analytics || {}), error: e.message }; }
+  delete S.busy.analytics;
+  if (AN_PAGES.includes(S.page)) render();
+}
+setInterval(() => { if (AN_PAGES.includes(S.page)) loadAnalytics(true); }, 60000);   // keeps "right now" fresh
+
+const nf = (n) => Number(n || 0).toLocaleString("vi-VN");
+const pct = (a, b) => (Number(b) ? Math.round((Number(a) / Number(b)) * 100) : 0);
+const usd = (cents) => `$${(Number(cents || 0) / 100).toFixed(2)}`;
+const dur = (ms) => { const sec = Math.round(Number(ms || 0) / 1000); return sec < 60 ? `${sec} giây` : `${Math.floor(sec / 60)} phút ${sec % 60} giây`; };
+const vsPrev = (cur, prev) => {
+  if (!Number(prev)) return "";
+  const d = pct(Number(cur) - Number(prev), prev);
+  return `${d >= 0 ? "▲" : "▼"} ${Math.abs(d)}% so với kỳ trước`;
+};
+let regionNames = null;
+try { regionNames = new Intl.DisplayNames(["vi"], { type: "region" }); } catch (e) { /* old WebView: show the code */ }
+const countryName = (code) => { if (!code) return "Chưa rõ"; try { return regionNames?.of(code) || code; } catch (e) { return code; } };
+const CHANNELS = { Direct: "Truy cập trực tiếp", "Organic Search": "Tìm kiếm (Google…)", "Organic Video": "Video (YouTube)",
+  "Organic Social": "Mạng xã hội", Referral: "Trang web khác", Email: "Email", Paid: "Quảng cáo trả phí" };
+const PAGE_NAMES = { "/": "Trang chủ", "/books": "Sách", "/bible-studies": "Bible Studies", "/watch": "Video", "/shop": "Cửa hàng", "/about": "Giới thiệu",
+  "/faq": "Câu hỏi thường gặp", "/contact": "Liên hệ", "/cart": "Giỏ hàng", "/login": "Đăng nhập", "/register": "Đăng ký", "/account": "Tài khoản",
+  "/free-resources": "Tài liệu miễn phí", "/download": "Trang tải sách", "/search": "Tìm kiếm", "/blog": "Blog" };
+const CHECKOUT_STATUS = { paid: ["ok", "circle-check", "Thanh toán thành công"], started: ["warn", "hourglass", "Chưa thanh toán"],
+  refunded: ["bad", "undo-2", "Đã hoàn tiền"], partially_refunded: ["warn", "undo-2", "Hoàn một phần"] };
+const card = (ic, title, body, cls = "") => `<section class="${cls}"><div class="section-head"><div class="icon-tile sm">${icon(ic)}</div><h2>${title}</h2></div><div class="card">${body}</div></section>`;
+const noData = (text = "Chưa có dữ liệu.") => `<span class="muted small">${text}</span>`;
+// A GA-style ranked list: name, number, and a thin bar for the share.
+function rankList(rows, name, value, unit) {
+  if (!rows.length) return noData();
+  const max = Math.max(1, ...rows.map(value));
+  return `<div class="rank">${rows.map((r) => `<div class="rank-row" title="${esc(name(r))}: ${nf(value(r))} ${unit}">
+    <div class="rank-top"><span>${esc(name(r))}</span><b>${nf(value(r))}</b></div><i style="width:${pct(value(r), max)}%"></i></div>`).join("")}</div>`;
+}
+function rangeBar() {
+  return `<div class="row"><div class="seg" role="group" aria-label="Khoảng thời gian">${[7, 28, 90].map((d) => `<button class="${S.anDays === d ? "active" : ""}" data-act="range" data-days="${d}">${d} ngày</button>`).join("")}</div>
+    <button class="btn outline sm" data-act="an-reload" ${S.busy.analytics ? "disabled" : ""}>${icon(S.busy.analytics ? "loader-circle" : "refresh-cw", S.busy.analytics ? "spin" : "")}Tải lại</button></div>`;
+}
+// Users per day: this period (line) against the period before (dashed), with a hover label per day.
+function dayChart(days) {
+  if (!days.length) return noData();
+  const max = Math.max(1, ...days.map((d) => Math.max(d.users, d.prev_users)));
+  const x = (i) => (days.length === 1 ? 50 : (i / (days.length - 1)) * 100), y = (v) => 100 - (v / max) * 100;
+  const line = (key) => days.map((d, i) => `${x(i).toFixed(2)},${y(Number(d[key])).toFixed(2)}`).join(" ");
+  const label = (d) => `${d.day.slice(8)}/${d.day.slice(5, 7)}`;
+  return `<div class="lchart"><div class="lchart-plot">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="50" x2="100" y2="50" class="grid"/><line x1="0" y1="100" x2="100" y2="100" class="grid"/>
+        <polyline points="${line("prev_users")}" class="prev"/><polyline points="${line("users")}" class="cur"/></svg>
+      <div class="lchart-hit">${days.map((d) => `<span title="${label(d)}: ${nf(d.users)} người dùng, ${nf(d.views)} lượt xem\nKỳ trước: ${nf(d.prev_users)} người dùng"></span>`).join("")}</div>
+      <small class="y-max">${nf(max)}</small><small class="y-mid">${nf(Math.round(max / 2))}</small></div>
+    <div class="row muted small"><span>${label(days[0])}</span><span class="grow"></span><span>${label(days[days.length - 1])}</span></div>
+    <div class="legend"><span><i class="cur"></i>${S.anDays} ngày qua</span><span><i class="prev"></i>${S.anDays} ngày trước đó</span></div></div>`;
 }
 
 /* ---------------- customer chat ---------------- */
@@ -327,35 +389,82 @@ const PAGES = {
         <span>Khi có khách mua, đơn sẽ hiện ở đây sau khi bấm Tải lại.</span></div>` : "")}</div></div>`;
   },
 
-  traffic() {
-    const t = S.traffic;
-    const sum = t?.summary || {};
-    const byDay = Object.fromEntries((t?.days || []).map((d) => [d.day, d]));
-    const days = [];
-    for (let i = 29; i >= 0; i--) {   // every day of the last 30, also the ones without visits
-      const key = new Date(Date.now() + 7 * 3600e3 - i * 86400e3).toISOString().slice(0, 10);   // Vietnam time, like the site
-      days.push({ day: key, views: Number(byDay[key]?.views || 0), visitors: Number(byDay[key]?.visitors || 0) });
-    }
-    const max = Math.max(1, ...days.map((d) => d.visitors));
-    const bars = days.map((d) => `<div class="bar" title="${d.day.slice(8)}/${d.day.slice(5, 7)}: ${d.visitors} khách, ${d.views} lượt xem"><i style="height:${Math.round((d.visitors / max) * 100)}%"></i></div>`).join("");
-    const pages = (t?.pages || []).map((p) => `<div class="page-row"><code>${esc(p.path)}</code><span class="grow"></span><span>${Number(p.visitors)} khách</span><b>${Number(p.views)} lượt xem</b></div>`).join("");
-    const both = (a) => `${Number(a || 0)} khách`;
+  analytics() {
+    const a = S.analytics || {}, sum = a.summary || {}, rt = a.realtime || {};
+    const loading = !S.analytics ? `<div class="empty"><b>Đang tải số liệu…</b></div>` : "";
+    const sources = (a.sources || []).map((r) => `<tr><td class="ellip" title="${esc(r.source)}">${esc(r.source)}</td><td>${esc(CHANNELS[r.channel] || r.channel)}</td>
+      <td>${nf(r.users)}</td><td>${nf(r.sessions)}</td><td>${nf(r.engaged)}</td><td>${dur(r.engage_ms / Math.max(1, r.sessions))}</td><td>${pct(r.engaged, r.sessions)}%</td></tr>`).join("");
     return `<div class="page">
-      ${header("chart-column", "Lượt truy cập", "Số khách vào web do chính website đếm. Không tính lượt của bạn khi đang đăng nhập admin.", refreshBtn("traffic"))}
+      ${header("chart-column", "Phân tích", "Khách vào web, đến từ đâu, xem trang nào. Website tự đếm, không tính lượt của bạn khi đăng nhập admin.", rangeBar())}
       <div class="top-block"><div class="stats">
-        ${stat("Hôm nay", both(sum.visitors_today), `${Number(sum.views_today || 0)} lượt xem trang`)}
-        ${stat("7 ngày qua", both(sum.visitors_7d), `${Number(sum.views_7d || 0)} lượt xem trang`)}
-        ${stat("30 ngày qua", both(sum.visitors_30d), `${Number(sum.views_30d || 0)} lượt xem trang`)}
-      </div>${loadNote(t)}</div>
-      <div class="page-body"><div class="sections wide">
-        <section><div class="section-head"><div class="icon-tile sm">${icon("chart-column")}</div><h2>Khách mỗi ngày, 30 ngày qua</h2></div>
-          <div class="card"><div class="bars">${bars}</div>
-            <div class="row muted small"><span>${days[0].day.slice(8)}/${days[0].day.slice(5, 7)}</span><span class="grow"></span><span>cao nhất ${max} khách/ngày</span><span class="grow"></span><span>hôm nay</span></div></div></section>
-        <section><div class="section-head"><div class="icon-tile sm">${icon("file-text")}</div><h2>Trang được xem nhiều nhất (30 ngày)</h2></div>
-          <div class="card">${pages || '<span class="muted small">Chưa có lượt xem nào được ghi.</span>'}</div></section>
-        <div class="note info">${icon("info")}<span class="grow">Muốn xem khách đến từ đâu, nước nào, dùng thiết bị gì: mở Google Analytics.</span>
+        ${stat("Người dùng", nf(sum.users), vsPrev(sum.users, sum.prev_users))}
+        ${stat("Người dùng mới", nf(sum.new_users))}
+        ${stat("Phiên truy cập", nf(sum.sessions), vsPrev(sum.sessions, sum.prev_sessions))}
+        ${stat("Lượt xem trang", nf(sum.views), vsPrev(sum.views, sum.prev_views))}
+        ${stat("Thời gian tương tác TB", dur(sum.engage_ms / Math.max(1, sum.users)), "mỗi người dùng")}
+        ${stat("Tỷ lệ tương tác", `${pct(sum.engaged, sum.sessions)}%`, `${nf(sum.engaged)} phiên có tương tác`)}
+      </div>${loadNote(a)}</div>
+      <div class="page-body">${loading || `<div class="an-grid">
+        ${card("trending-up", "Người dùng mỗi ngày", dayChart(a.days || []), "span2")}
+        ${card("radio", "Đang hoạt động", `<div class="rt"><div><b>${nf(rt.users_30m)}</b><span>người dùng trong 30 phút qua</span></div>
+            <div><b>${nf(rt.users_5m)}</b><span>trong 5 phút qua</span></div></div>
+          <div class="bars mini" title="Người dùng mỗi phút, 30 phút qua">${(rt.minutes || []).map((n, k, all) => `<div class="bar" title="${all.length - 1 - k === 0 ? "Phút này" : `${all.length - 1 - k} phút trước`}: ${n} người dùng"><i style="height:${pct(n, Math.max(1, ...all))}%"></i></div>`).join("")}</div>
+          <div class="row muted small"><span>-30 phút</span><span class="grow"></span><span>bây giờ</span></div>
+          ${rankList(rt.countries || [], (r) => countryName(r.country), (r) => r.users, "người dùng")}`)}
+        ${card("globe", "Người dùng theo quốc gia", rankList(a.countries || [], (r) => countryName(r.country), (r) => r.users, "người dùng"))}
+        ${card("file-text", "Lượt xem theo trang", rankList(a.pages || [], (r) => r.title || PAGE_NAMES[r.path] || r.path, (r) => r.views, "lượt xem"))}
+        ${card("split", "Phiên theo kênh", rankList(a.channels || [], (r) => CHANNELS[r.channel] || r.channel, (r) => r.sessions, "phiên"))}
+        ${card("signpost", "Nguồn truy cập", sources ? `<table class="tbl"><thead><tr><th>Nguồn</th><th>Kênh</th><th>Người dùng</th><th>Phiên</th><th>Phiên có tương tác</th><th>Thời gian TB/phiên</th><th>Tỷ lệ tương tác</th></tr></thead>
+            <tbody>${sources}</tbody></table>` : noData(), "span3")}
+        <div class="note info span3">${icon("info")}<span class="grow">Số liệu có thể lệch so với Google Analytics vì hai bên đếm khác nhau (ví dụ trình chặn quảng cáo chặn Google Analytics). Quốc gia, nguồn và thời gian tương tác được ghi từ 12/10/2026.</span>
           <button class="btn outline sm" data-act="open" data-url="https://analytics.google.com/">${icon("external-link")}Mở Google Analytics</button></div>
-      </div></div></div>`;
+      </div>`}</div></div>`;
+  },
+
+  cart() {
+    const a = S.analytics || {}, f = a.funnel || {};
+    const steps = [["Xem trang sách", f.book_views, "eye"], ["Thêm vào giỏ hàng", f.add_to_cart, "shopping-cart"], ["Vào trang thanh toán", f.checkouts, "credit-card"], ["Thanh toán thành công", f.checkouts_paid, "circle-check"]];
+    const funnel = steps.map(([label, n, ic], k) => `<div class="fstep"><div class="rank-top">${icon(ic)}<span>${label}</span><b>${nf(n)}</b></div>
+        <i style="width:${pct(n, Math.max(1, steps[0][1]))}%"></i>${k ? `<small>${pct(n, steps[k - 1][1])}% của bước trước</small>` : ""}</div>`).join("");
+    const books = (a.books || []).map((b) => `<tr><td class="ellip" title="${esc(b.title)}">${esc(b.title)}</td><td>${nf(b.views)}</td><td>${nf(b.add_to_cart)}</td><td>${nf(b.checkouts)}</td><td>${nf(b.sold)}</td></tr>`).join("");
+    const checkouts = (a.checkouts || []).map((c) => {
+      const [cls, ic, label] = CHECKOUT_STATUS[c.status] || ["muted", "circle-dashed", c.status];
+      return `<div class="item order"><div class="item-main">
+          <b class="order-email">${esc(c.email || (c.account ? "Khách có tài khoản" : "Khách vãng lai (chưa để lại email)"))}</b>
+          <div class="item-meta"><span class="chip">${icon("clock")}${esc(when(c.date))}</span><span class="chip">${icon("book-open")}${c.items.length} cuốn</span>
+            ${c.order_id ? `<span class="chip">${icon("hash")}${esc(c.order_id)}</span>` : ""}</div>
+          <div class="order-books">${c.items.map((t) => `<span>${esc(t)}</span>`).join("")}</div></div>
+        <div class="item-side"><b class="order-total">${usd(c.total)}</b><span class="pill ${cls}">${icon(ic)}${label}</span></div></div>`;
+    }).join("");
+    return `<div class="page">
+      ${header("shopping-cart", "Giỏ hàng và thanh toán", "Sách nào được thêm vào giỏ, bao nhiêu lần khách vào trang thanh toán và có trả tiền thành công không.", rangeBar())}
+      <div class="top-block"><div class="stats">
+        ${stat("Thêm vào giỏ", nf(f.add_to_cart))}
+        ${stat("Vào thanh toán", nf(f.checkouts))}
+        ${stat("Thanh toán thành công", nf(f.checkouts_paid), f.checkouts ? `${pct(f.checkouts_paid, f.checkouts)}% số lần vào thanh toán` : "")}
+        ${stat("Đơn hàng", nf(f.orders), "đã thanh toán trong khoảng này")}
+      </div>${loadNote(a)}</div>
+      <div class="page-body">${!S.analytics ? `<div class="empty"><b>Đang tải số liệu…</b></div>` : `<div class="an-grid">
+        ${card("filter", "Phễu mua hàng", `<div class="rank">${funnel}</div>`)}
+        ${card("book-open", "Theo từng sách", books ? `<table class="tbl"><thead><tr><th>Sách</th><th>Lượt xem</th><th>Thêm giỏ</th><th>Vào thanh toán</th><th>Đã bán</th></tr></thead><tbody>${books}</tbody></table>` : noData(), "span2")}
+        ${card("credit-card", "Các lần vào thanh toán, mới nhất ở trên", checkouts ? `<div class="list">${checkouts}</div>` : noData("Chưa có khách nào vào trang thanh toán trong khoảng này."), "span3")}
+        <div class="note info span3">${icon("info")}<span>“Chưa thanh toán” là khách đã mở trang thanh toán nhưng không trả tiền (bỏ ngang, thẻ bị từ chối…). Giỏ hàng và lượt thanh toán được ghi từ 12/10/2026.</span></div>
+      </div>`}</div></div>`;
+  },
+
+  emails() {
+    const a = S.analytics || {}, sub = a.subscribers || {};
+    const rows = (sub.items || []).map((r) => `<div class="page-row"><b class="ellip grow" title="${esc(r.email)}">${esc(r.email)}</b><span>${esc(r.source || "")}</span><span>${esc(when(r.date))}</span></div>`).join("");
+    return `<div class="page">
+      ${header("mail", "Email đăng ký", "Khách để lại email ở các ô đăng ký trên web.", rangeBar())}
+      <div class="top-block"><div class="stats">
+        ${stat("Tổng số email", nf(sub.total))}
+        ${stat(`Mới trong ${S.anDays} ngày`, nf(sub.in_range))}
+      </div>${loadNote(a)}</div>
+      <div class="page-body">${!S.analytics ? `<div class="empty"><b>Đang tải số liệu…</b></div>` : `<div class="sections wide">
+        ${card("mail", "Mới nhất ở trên", rows ? `${rows}<div class="row"><button class="btn soft sm" data-act="copy-emails">${icon("copy")}Copy tất cả email</button>
+          ${sub.total > (sub.items || []).length ? `<span class="muted small">Hiện ${nf((sub.items || []).length)} email mới nhất.</span>` : ""}</div>` : noData("Chưa có ai đăng ký.")) }
+      </div>`}</div></div>`;
   },
 
   settings() {
@@ -597,6 +706,12 @@ const ACTIONS = {
   async pick() { try { const r = await api("/api/pick-folder"); if (r.folder) { $("#folder").value = r.folder; scan(r.folder); } } catch (e) { toast("error", e.message); } },
   scan() { scan($("#folder").value); },
   reload(el) { loadSite(el.dataset.what); },
+  range(el) { S.anDays = Number(el.dataset.days); loadAnalytics(); },
+  "an-reload"() { loadAnalytics(); },
+  async "copy-emails"() {
+    const emails = (S.analytics?.subscribers?.items || []).map((r) => r.email).join("\n");
+    toast((await copyText(emails)) ? "success" : "error", "Đã copy danh sách email.");
+  },
   "chat-open"(el) { S.chat.active = el.dataset.id; S.chat.messages = []; render(); loadThread(true).then(() => $("#chat-reply")?.focus()); },
   "chat-send"() { sendChat(); },
   restore() { runRestore(); },
@@ -637,7 +752,7 @@ const ACTIONS = {
 
 document.addEventListener("click", (ev) => {
   const nav = ev.target.closest("[data-nav]");
-  if (nav) { S.page = nav.dataset.nav; render(); if (S.page === "orders") markOrdersSeen(); if (S.page === "orders" || S.page === "traffic") loadSite(S.page); return; }
+  if (nav) { S.page = nav.dataset.nav; render(); if (S.page === "orders") markOrdersSeen(); if (S.page === "orders") loadSite("orders"); if (AN_PAGES.includes(S.page)) loadAnalytics(); return; }
   const el = ev.target.closest("[data-act]");
   if (el && !el.disabled && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el, el.closest(".item"), ev);
 });

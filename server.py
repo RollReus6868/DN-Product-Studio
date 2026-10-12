@@ -300,9 +300,10 @@ def api_orders(_body: dict) -> dict:
         raise ApiError(str(exc), exc.code) from exc
 
 
-def api_traffic(_body: dict) -> dict:
+def api_analytics(body: dict) -> dict:
+    days = body.get("days") if body.get("days") in (7, 28, 90) else 7
     try:
-        return _client(storage.load_config()).traffic()
+        return _client(storage.load_config()).analytics(days)
     except webstore.SiteError as exc:
         raise ApiError(str(exc), exc.code) from exc
 
@@ -415,7 +416,7 @@ ROUTES = {
     "/api/item/prompt": api_item_prompt, "/api/item/reply": api_item_reply,
     "/api/item/listing": api_item_listing, "/api/item/publish": api_item_publish,
     "/api/restore/list": api_restore_list, "/api/restore/one": api_restore_one,
-    "/api/site/ping": api_site_ping, "/api/orders": api_orders, "/api/traffic": api_traffic,
+    "/api/site/ping": api_site_ping, "/api/orders": api_orders, "/api/analytics": api_analytics,
     "/api/chat/list": api_chat_list, "/api/chat/thread": api_chat_thread, "/api/chat/reply": api_chat_reply, "/api/token/generate": api_token_generate,
     "/api/token/set": api_token_set, "/api/token/show": api_token_show, "/api/open": api_open,
     "/api/update/check": api_update_check, "/api/update/install": api_update_install,

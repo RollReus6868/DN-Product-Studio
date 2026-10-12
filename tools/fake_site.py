@@ -23,7 +23,8 @@ class FakeSite:
         self.records: dict[str, list[dict]] = {"Ebook": [], "Product": []}
         self.chats: list[dict] = []       # conversations, each with its "messages"
         self.orders: list[dict] = []      # what the "orders" action returns
-        self.traffic: dict = {"summary": {}, "days": [], "pages": []}
+        self.analytics: dict = {}            # what the "analytics" action returns
+        self.analytics_days: list[int] = []  # the ranges the tool asked for
         self.files: list[dict] = []       # uploaded files, in order
         self.tickets: dict[str, dict] = {}
         self.fail_upload = False
@@ -84,8 +85,9 @@ class FakeSite:
                     return self._json(200, {"message": msg})
                 if action == "orders":
                     return self._json(200, {"items": site.orders})
-                if action == "traffic":
-                    return self._json(200, site.traffic)
+                if action == "analytics":
+                    site.analytics_days.append(body.get("days"))
+                    return self._json(200, {**site.analytics, "days_range": body.get("days")})
                 if action == "upload_url":
                     name = str(body.get("name") or "")
                     if not re.search(r"\.(pdf|jpe?g|png|webp)$", name, re.I):

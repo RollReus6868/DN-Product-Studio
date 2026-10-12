@@ -337,13 +337,15 @@ class ServerTests(unittest.TestCase):
         again = self.call("/api/ebooks/scan", {"folder": self.td})["ebooks"][1]
         self.assertEqual((again["has_listing"], again["web_status"], again["price"], again["pages"]), (True, "draft", 12.5, 1))
 
-    def test_orders_and_traffic_are_passed_through(self):
+    def test_orders_and_analytics_are_passed_through(self):
         self.site.orders = [{"order_id": "9001", "date": "2026-10-07T03:00:00Z", "email": "a@b.c", "status": "paid",
                              "currency": "USD", "buyer": "guest", "total": 3198, "items": ["Book 1", "Book 2"]}]
-        self.site.traffic = {"summary": {"visitors_today": 2, "views_today": 5}, "days": [{"day": "2026-10-07", "views": 5, "visitors": 2}],
-                             "pages": [{"path": "/books", "views": 3, "visitors": 2}]}
+        self.site.analytics = {"summary": {"users": 2, "views": 5}, "pages": [{"path": "/books", "views": 3, "users": 2}]}
         self.assertEqual(self.call("/api/orders")["items"], self.site.orders)
-        self.assertEqual(self.call("/api/traffic"), self.site.traffic)
+        self.assertEqual(self.call("/api/analytics", {"days": 28}), {**self.site.analytics, "days_range": 28})
+        self.call("/api/analytics", {"days": 5})   # only 7 / 28 / 90 days
+        self.call("/api/analytics", {})
+        self.assertEqual(self.site.analytics_days, [28, 7, 7])
 
     def test_chat_read_and_reply(self):
         self.site.chats = [{"id": "c1", "visitor_name": "", "guest_key": "guestkey-abc123", "user_id": None, "unread_for_admin": True,

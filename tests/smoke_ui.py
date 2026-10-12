@@ -103,10 +103,27 @@ site.chats = [
      "last_message_preview": "You're welcome!", "messages": [{"id": "m4", "sender_role": "visitor", "created_date": "2026-10-05T10:58:00Z", "body": "Thanks"},
                                                     {"id": "m5", "sender_role": "admin", "created_date": "2026-10-05T11:00:00Z", "body": "You're welcome!"}]}]
 _today = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=7)
-site.traffic = {"summary": {"views_today": 31, "visitors_today": 14, "views_7d": 240, "visitors_7d": 96, "views_30d": 811, "visitors_30d": 342},
-                "days": [{"day": (_today - datetime.timedelta(days=i)).strftime("%Y-%m-%d"), "views": 40 - i, "visitors": (14 if i == 0 else (i * 7) % 23)} for i in range(0, 30, 1) if i % 6 != 5],
-                "pages": [{"path": "/", "views": 320, "visitors": 210}, {"path": "/books", "views": 190, "visitors": 120},
-                          {"path": "/books/the-book-of-enoch-a-black-readers-study-edition-full-version", "views": 88, "visitors": 61}]}
+_day = lambda i: (_today - datetime.timedelta(days=i)).strftime("%Y-%m-%d")  # noqa: E731
+site.analytics = {
+    "summary": {"users": 97, "new_users": 88, "sessions": 111, "views": 366, "engaged": 62, "engage_ms": 8_830_000, "prev_users": 60, "prev_sessions": 70, "prev_views": 300},
+    "days": [{"day": _day(i), "users": [0, 0, 7, 7, 14, 17, 30][6 - i], "views": [0, 0, 20, 25, 60, 90, 171][6 - i], "prev_users": [2, 4, 3, 5, 6, 9, 8][6 - i]} for i in range(6, -1, -1)],
+    "countries": [{"country": "US", "users": 51}, {"country": "VN", "users": 5}, {"country": "ZA", "users": 5}, {"country": "CA", "users": 1}, {"country": "", "users": 3}],
+    "pages": [{"path": "/", "title": None, "views": 149, "users": 87}, {"path": "/bible-studies", "title": None, "views": 34, "users": 19},
+              {"path": "/books/the-book-of-enoch", "title": "The Book of Enoch: A Black Reader's Study Edition - Full Version", "views": 27, "users": 9}],
+    "channels": [{"channel": "Organic Video", "sessions": 56, "users": 51, "engaged": 32, "engage_ms": 4_000_000}, {"channel": "Direct", "sessions": 45, "users": 38, "engaged": 22, "engage_ms": 3_000_000},
+                 {"channel": "Organic Search", "sessions": 10, "users": 9, "engaged": 8, "engage_ms": 900_000}],
+    "sources": [{"source": "youtube.com", "channel": "Organic Video", "sessions": 56, "users": 51, "engaged": 32, "engage_ms": 4_000_000},
+                {"source": "(direct)", "channel": "Direct", "sessions": 45, "users": 38, "engaged": 22, "engage_ms": 3_000_000},
+                {"source": "com.google.android.googlequicksearchbox", "channel": "Organic Search", "sessions": 3, "users": 3, "engaged": 2, "engage_ms": 200_000}],
+    "realtime": {"users_30m": 3, "users_5m": 1, "minutes": [0] * 20 + [1, 0, 0, 2, 0, 0, 1, 0, 0, 1], "countries": [{"country": "US", "users": 2}, {"country": "ZA", "users": 1}]},
+    "subscribers": {"total": 5, "in_range": 2, "items": [{"email": "grace.okafor@example.com", "source": "Homepage", "date": "2026-10-11T09:00:00Z"},
+                                                         {"email": "reader@example.org", "source": "Free guide", "date": "2026-10-09T02:00:00Z"}]},
+    "funnel": {"book_views": 34, "add_to_cart": 9, "checkouts": 4, "checkouts_paid": 1, "orders": 1},
+    "books": [{"id": "e1", "title": "The Ethiopian Canon - Full Version", "views": 12, "add_to_cart": 5, "checkouts": 3, "sold": 1},
+              {"id": "e2", "title": "The Book of Enoch: A Black Reader's Study Edition - Full Version", "views": 7, "add_to_cart": 4, "checkouts": 1, "sold": 0}],
+    "checkouts": [{"date": "2026-10-12T05:10:00Z", "total": 2699, "email": None, "status": "started", "order_id": None, "account": False, "items": ["The Book of Enoch: A Black Reader's Study Edition - Full Version"]},
+                  {"date": "2026-10-11T03:00:00Z", "total": 499, "email": "grace.okafor@example.com", "status": "paid", "order_id": "9712004", "account": True, "items": ["The Ethiopian Canon - Full Version"]}],
+}
 _srv, URL = server.start()
 
 books = Path(tempfile.mkdtemp(prefix="BOOK_"))
@@ -253,10 +270,23 @@ def main() -> int:
             page.wait_for_function("!document.querySelector('[data-nav=orders] .count')")   # seen: the badge goes away and stays away
             assert storage.load_config()["orders_seen"] == site.orders[0]["date"]
             shot("07b_orders")
-            page.click('[data-nav="traffic"]')
-            page.wait_for_selector(".page-row")
-            assert page.locator(".bar").count() == 30 and "14 khách" in page.inner_text(".stats")
-            shot("07c_traffic")
+            page.click('[data-nav="analytics"]')
+            page.wait_for_selector(".lchart")
+            assert "97" in page.inner_text(".stats") and "Hoa Kỳ" in page.inner_text(".page-body") and "Video (YouTube)" in page.inner_text(".page-body")
+            assert page.locator(".bars.mini .bar").count() == 30 and page.locator(".tbl tbody tr").count() == 3
+            shot("07c_analytics")
+            page.click('[data-act="range"][data-days="28"]')
+            page.wait_for_function("document.querySelector('[data-days=\"28\"]').classList.contains('active') && !document.querySelector('[data-act=an-reload]').disabled")
+            assert site.analytics_days[-1] == 28
+            page.click('[data-nav="cart"]')
+            page.wait_for_selector(".fstep")
+            assert page.locator(".fstep").count() == 4 and "Chưa thanh toán" in page.inner_text(".page-body") and "Thanh toán thành công" in page.inner_text(".page-body")
+            shot("07d_cart")
+            page.click('[data-nav="emails"]')
+            page.wait_for_selector('[data-act="copy-emails"]')
+            page.click('[data-act="copy-emails"]')
+            assert page.evaluate("navigator.clipboard.readText()") == "grace.okafor@example.com\nreader@example.org"
+            shot("07e_emails")
             page.click('[data-nav="settings"]')
             page.click('[data-act="ping"]')
             page.wait_for_selector(".note.ok")

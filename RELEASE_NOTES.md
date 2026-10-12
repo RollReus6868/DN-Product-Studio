@@ -1,5 +1,11 @@
-# DN Product Studio 1.3.2
+# DN Product Studio 1.4.0
 
+- **Phân tích** (thay cho Lượt truy cập), giống Google Analytics: người dùng, người dùng mới, phiên, lượt xem, thời gian tương tác, tỷ lệ tương tác (so với kỳ trước); biểu đồ người dùng mỗi ngày; **đang hoạt động** trong 30 phút qua; người dùng theo **quốc gia**; lượt xem theo **trang**; phiên theo **kênh** (YouTube, Google, trực tiếp…); bảng **nguồn truy cập**. Chọn 7, 28 hoặc 90 ngày.
+- **Giỏ & thanh toán** (mục mới): số lần thêm vào giỏ, số lần vào trang thanh toán, số lần thanh toán thành công; phễu mua hàng; bảng theo từng sách; danh sách từng lần vào thanh toán và kết quả (thành công / chưa thanh toán / hoàn tiền).
+- **Email đăng ký** (mục mới): tổng số email, số email mới, danh sách và nút copy tất cả.
+- Số liệu quốc gia, nguồn, thời gian tương tác, giỏ hàng và thanh toán được web ghi từ 12/10/2026.
+
+Từ bản 1.3.2:
 - **Huy hiệu đỏ trên icon** như thông báo trên điện thoại: icon **Tin nhắn** hiện số khách đang chờ trả lời, icon **Đơn hàng** hiện số đơn mới. Thu gọn thanh bên vẫn thấy.
 - Tool tự kiểm tra đơn mới mỗi phút, kể cả khi bạn đang ở mục khác, và hiện thông báo ở góc trên khi có đơn mới.
 - Mở mục Đơn hàng là số đơn mới tự về 0. Lần đầu mở bản này, các đơn cũ không tính là mới.
