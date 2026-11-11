@@ -27,6 +27,7 @@ import pdfread  # noqa: E402
 import prompts  # noqa: E402
 import scan  # noqa: E402
 import server  # noqa: E402
+import shrink  # noqa: E402
 import spring  # noqa: E402
 import storage  # noqa: E402
 import webstore  # noqa: E402
@@ -174,25 +175,45 @@ class PublishTests(unittest.TestCase):
         make_folder(self.td, ("The-Book-of-Enoch",))
         eb = scan.scan_folder(self.td)["ebooks"][0]
         self.item = {**eb, "price": 9.99, "listing": dict(GOOD)}
-        self.cfg = {"shared_variant_id": "2204367"}
+        self.cfg = {"pdf_shrink": "safe"}
 
     def test_ebook_draft_private_pdf_and_small_cover(self):
         web = webstore.publish_ebook(self.item, self.cfg, self.client)
         rec = self.site.records["Ebook"][0]
         self.assertEqual((web["status"], rec["status"], rec["slug"]), ("draft", "draft", "the-book-of-enoch"))
-        self.assertEqual((rec["price"], rec["lemon_squeezy_variant_id"]), (9.99, "2204367"))
+        self.assertEqual(rec["price"], 9.99)
+        self.assertNotIn("lemon_squeezy_variant_id", rec)
         self.assertRegex(rec["secure_file_uri"], r"^[0-9a-f]{8}_The-Book-of-Enoch\.pdf$")
         self.assertIn("/public-files/", rec["cover_image"])
         self.assertEqual(rec["faq"], GOOD["faq"])
         cover, pdf = self.site.files
-        self.assertEqual((cover["private"], cover["name"], cover["head"][:2]), (False, "the-book-of-enoch.jpg", b"\xff\xd8"))
+        self.assertEqual((cover["private"], cover["name"], cover["head"]), (False, "the-book-of-enoch.webp", b"RIFF"))
         self.assertEqual((pdf["private"], pdf["name"], pdf["head"]), (True, "The-Book-of-Enoch.pdf", b"%PDF"))
         self.assertTrue(cover["cache_field"], "uploads ask browsers to keep the file for a year")
 
     def test_cover_is_shrunk_to_the_size_the_site_shows(self):
         from PIL import Image
-        with Image.open(io.BytesIO(webstore.cover_jpeg(self.item["cover"], webstore.COVER_BOX))) as im:
+        with Image.open(io.BytesIO(webstore.cover_webp(self.item["cover"], webstore.COVER_BOX))) as im:
+            self.assertEqual(im.format, "WEBP")
             self.assertLessEqual((im.width, im.height), webstore.COVER_BOX)
+
+    def test_pdf_is_compressed_before_upload_unless_turned_off(self):
+        bloated_pdf(Path(self.item["pdf"]))
+        size = os.path.getsize(self.item["pdf"])
+        web = webstore.publish_ebook(self.item, self.cfg, self.client)
+        pdf = self.site.files[1]
+        self.assertEqual((pdf["name"], pdf["head"]), ("The-Book-of-Enoch.pdf", b"%PDF"))
+        self.assertLess(pdf["size"], size)
+        self.assertEqual(web["pdf_sizes"], {"before": size, "after": pdf["size"]})
+        # off: the file goes up exactly as it is
+        os.utime(self.item["pdf"], ns=(1, 1))
+        webstore.publish_ebook(self.item, {"pdf_shrink": "off"}, self.client)
+        self.assertEqual(self.site.files[2]["size"], size)
+        # restoring a PDF of a copied book is compressed too
+        self.site.records["Ebook"].append({"id": "a", "title": "Old", "slug": "old", "status": "published",
+                                           "secure_file_uri": "mp/private/6aa80a39/2ee2042ac_The-Book-of-Enoch.pdf"})
+        webstore.restore_pdf(self.item["pdf"], self.client, {"pdf_shrink": "strong"})
+        self.assertLess(self.site.files[3]["size"], pdf["size"])
 
     def test_republish_updates_without_reupload_and_keeps_status(self):
         webstore.publish_ebook(self.item, self.cfg, self.client)
@@ -258,12 +279,124 @@ class PublishTests(unittest.TestCase):
         rec = self.site.records["Product"][0]
         self.assertEqual((web["status"], rec["slug"], rec["category"], len(rec["images"]), rec["spring_url"]),
                          ("draft", "lion-of-judah-mug", "Mugs", 2, "https://s/l"))
-        self.assertTrue(all(f["head"][:2] == b"\xff\xd8" and not f["private"] for f in self.site.files))
+        self.assertTrue(all(f["head"] == b"RIFF" and f["name"].endswith(".webp") and not f["private"] for f in self.site.files))
         webstore.publish_pod(item, {}, self.client)
         self.assertEqual(len(self.site.files), 2, "unchanged photos are not uploaded again")
         item["images"] = [f"{base}/missing.gif"]
         with self.assertRaises(webstore.SiteError):
             webstore.publish_pod(item, {}, self.client)
+
+
+def bloated_pdf(path: Path, pages: int = 4) -> None:
+    """A PDF written without compression and with a big photo on every page (like many exported books)."""
+    from pypdf import PdfWriter
+    from pypdf.generic import ContentStream, DecodedStreamObject, NameObject
+
+    photo = io.BytesIO()
+    Image.radial_gradient("L").resize((2400, 3200)).convert("RGB").save(photo, "PDF", resolution=300)
+    from pypdf import PdfReader
+    w = PdfWriter()
+    for i in range(pages):
+        w.add_page(PdfReader(io.BytesIO(photo.getvalue())).pages[0])
+        text = DecodedStreamObject()
+        text.set_data((f"BT /F1 12 Tf 72 72 Td (Page {i} " + "lorem ipsum " * 300 + ") Tj ET\n").encode() * 20)
+        w.pages[-1][NameObject("/Contents")] = w._add_object(text)
+    with open(path, "wb") as f:
+        w.write(f)
+
+
+class ShrinkTests(unittest.TestCase):
+    def setUp(self):
+        self.td = Path(tempfile.mkdtemp())
+
+    def test_pictures_become_small_webp(self):
+        Image.new("RGBA", (3000, 4500), (20, 40, 80, 255)).save(self.td / "big.png")
+        data = shrink.web_image(str(self.td / "big.png"), shrink.COVER_BOX)
+        with Image.open(io.BytesIO(data)) as im:
+            self.assertEqual((im.format, im.size, im.mode), ("WEBP", (640, 960), "RGB"))
+        Image.new("RGB", (300, 200)).save(self.td / "small.jpg")
+        with Image.open(io.BytesIO(shrink.web_image((self.td / "small.jpg").read_bytes()))) as im:
+            self.assertEqual(im.size, (300, 200), "never enlarged")
+
+    def test_pdf_lossless_keeps_pages_and_text(self):
+        bloated_pdf(self.td / "b.pdf")
+        data, before, after = shrink.shrink_pdf(str(self.td / "b.pdf"))
+        self.assertIsNotNone(data)
+        self.assertLess(after, before)
+        from pypdf import PdfReader
+        r = PdfReader(io.BytesIO(data))
+        self.assertEqual(len(r.pages), 4)
+        self.assertIn(b"(Page 3 lorem ipsum", r.pages[3].get_contents().get_data())
+        # the photos are untouched in lossless mode
+        self.assertEqual(r.pages[0].images[0].image.size, (2400, 3200))
+
+    def test_pdf_strong_shrinks_photos(self):
+        bloated_pdf(self.td / "b.pdf")
+        safe = shrink.shrink_pdf(str(self.td / "b.pdf"))[2]
+        data, _before, strong = shrink.shrink_pdf(str(self.td / "b.pdf"), strong=True)
+        from pypdf import PdfReader
+        r = PdfReader(io.BytesIO(data))
+        self.assertLess(strong, safe)
+        self.assertEqual(len(r.pages), 4)
+        self.assertLessEqual(max(r.pages[0].images[0].image.size), shrink.STRONG_MAX_SIDE)
+
+    def test_pdf_that_cannot_be_improved_or_read_is_kept(self):
+        (self.td / "t.pdf").write_bytes(tiny_pdf())
+        self.assertEqual(shrink.shrink_pdf(str(self.td / "t.pdf"))[0], None)
+        (self.td / "x.pdf").write_bytes(b"%PDF-1.4 not really")
+        data, before, after = shrink.shrink_pdf(str(self.td / "x.pdf"))
+        self.assertEqual((data, before, after), (None, 19, 19))
+
+
+class LightenTests(unittest.TestCase):
+    """Re-saving the pictures already on the site as WebP (Cài đặt › Nén lại ảnh trên web)."""
+
+    def setUp(self):
+        self.site = FakeSite()
+        self.addCleanup(self.site.close)
+        self.client = webstore.SiteClient(self.site.api, TOKEN)
+
+    def _put(self, name: str, size=(1600, 2400)) -> str:
+        buf = io.BytesIO()
+        Image.radial_gradient("L").resize(size).convert("RGB").save(buf, "JPEG", quality=97)
+        return self.client.upload(name, buf.getvalue(), False)
+
+    def test_heavy_pictures_are_replaced_and_others_left_alone(self):
+        jpg = self._put("old-cover.jpg")
+        webp = self._put("done.webp")
+        p1, p2 = self._put("mug-1.jpg"), self._put("mug-2.jpg")
+        self.site.records["Ebook"] += [
+            {"id": "e1", "title": "Heavy", "slug": "h", "status": "published", "cover_image": jpg},
+            {"id": "e2", "title": "Already light", "slug": "l", "status": "published", "cover_image": webp},
+            {"id": "e3", "title": "Site picture", "slug": "s", "status": "published",
+             "cover_image": "https://darknetworkofficial.uk/img/opt/a-640.webp"},
+            {"id": "e4", "title": "Other site", "slug": "o", "status": "draft", "cover_image": "https://example.com/a.jpg"}]
+        self.site.records["Product"].append({"id": "p1", "title": "Mug", "slug": "m", "status": "draft", "images": [p1, p2]})
+        uploads = len(self.site.files)
+        seen = []
+        out = webstore.lighten_site_pictures(self.client, lambda n, t, title: seen.append((n, t, title)))
+        self.assertEqual((out["done"], out["skipped"], out["failed"]), (2, 3, []))
+        self.assertLess(out["after"], out["before"])
+        self.assertEqual(seen, [(1, 2, "Heavy"), (2, 2, "Mug")])
+        e1, e2, e3, e4 = self.site.records["Ebook"]
+        self.assertRegex(e1["cover_image"], r"/public-files/[0-9a-f]{8}_old-cover\.webp$")
+        self.assertEqual((e2["cover_image"], e3["cover_image"], e4["cover_image"]),
+                         (webp, "https://darknetworkofficial.uk/img/opt/a-640.webp", "https://example.com/a.jpg"))
+        prod = self.site.records["Product"][0]["images"]
+        self.assertTrue(all(u.endswith(".webp") for u in prod) and len(prod) == 2)
+        new = self.site.files[uploads:]
+        self.assertEqual(len(new), 3)
+        with Image.open(io.BytesIO(self.site.blobs[e1["cover_image"][len(self.site.base):]])) as im:
+            self.assertEqual((im.format, im.size), ("WEBP", (640, 960)))
+        # a second run has nothing left to do
+        self.assertEqual(webstore.lighten_site_pictures(self.client)["done"], 0)
+
+    def test_a_missing_picture_is_reported_not_fatal(self):
+        self.site.records["Ebook"].append({"id": "e1", "title": "Gone", "slug": "g", "status": "draft",
+                                           "cover_image": f"{self.site.base}/storage/v1/object/public/public-files/x_gone.jpg"})
+        out = webstore.lighten_site_pictures(self.client)
+        self.assertEqual((out["done"], len(out["failed"])), (0, 1))
+        self.assertIn("Gone", out["failed"][0])
 
 
 class ServerTests(unittest.TestCase):
@@ -361,9 +494,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(len(self.site.chats[0]["messages"]), 2)
 
     def test_config_validation(self):
-        self.assertEqual(self.call("/api/config", {"shared_variant_id": " 2204367 ", "default_price": "7.5"})["config"]["shared_variant_id"], "2204367")
+        self.assertEqual(self.call("/api/config", {"pdf_shrink": "strong", "default_price": "7.5"})["config"]["pdf_shrink"], "strong")
         self.assertEqual(storage.load_config()["default_price"], 7.5)
-        self.call("/api/config", {"shared_variant_id": "abc"}, status=400)
+        self.call("/api/config", {"pdf_shrink": "max"}, status=400)
+        self.call("/api/config", {"pdf_shrink": "safe"})
+        self.assertNotIn("shared_variant_id", self.call("/api/config", {"shared_variant_id": "1"})["config"])
         self.call("/api/config", {"default_price": "0"}, status=400)
         self.call("/api/open", {"url": "file:///etc/passwd"}, status=400)
         self.call("/api/pods/add", {"urls": ""}, status=400)

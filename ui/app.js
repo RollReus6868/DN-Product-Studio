@@ -40,6 +40,13 @@ function setState(d) {
   if (d.ebooks) S.ebooks = d.ebooks;
   if (d.pods) S.pods = d.pods;
 }
+const PDF_MODES = {
+  off: { label: "Tắt", hint: "Tải PDF lên đúng như file gốc." },
+  safe: { label: "Giữ nguyên chất lượng", hint: "Nén mà không đổi gì trong sách (chữ, ảnh giữ nguyên). Nhẹ đi bao nhiêu tuỳ file; nếu không nhẹ hơn, tool giữ file gốc. Nên dùng." },
+  strong: { label: "Nén mạnh", hint: "Lưu lại các ảnh lớn trong sách nhẹ hơn (JPEG 80%, tối đa 1800 px). Sách nhiều ảnh hoặc bản scan nhẹ đi nhiều nhất; ảnh hơi kém nét khi phóng to. Chữ không đổi." },
+};
+function fmtSize(n) { return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`; }
+function pdfText(p) { return p && p.after < p.before ? ` PDF nhẹ hơn: ${fmtSize(p.before)} → ${fmtSize(p.after)}.` : ""; }
 function toast(type, text) {
   const el = document.createElement("div");
   el.className = `toast ${type}`;
@@ -481,7 +488,7 @@ const PAGES = {
          <div class="row">${u.auto ? `<button class="btn soft" data-act="update-install" ${d?.state === "downloading" || d?.state === "restarting" ? "disabled" : ""}>${icon("download")}Cập nhật ngay</button>` : ""}
            <button class="btn outline" data-act="open" data-url="${esc(u.url)}">${icon("external-link")}Mở trang tải</button></div>`;
     return `<div class="page">
-      ${header("settings", "Cài đặt", "Kết nối website, Lemon Squeezy, giao diện và cập nhật.")}
+      ${header("settings", "Cài đặt", "Kết nối website, giá, nén file, giao diện và cập nhật.")}
       <div class="page-body"><div class="sections">
         <section><div class="section-head"><div class="icon-tile sm">${icon("plug-zap")}</div><h2>Kết nối website</h2></div>
           <div class="card">
@@ -494,13 +501,23 @@ const PAGES = {
               <button class="btn outline sm" data-act="ping" ${S.busy.ping ? "disabled" : ""}>${icon(S.busy.ping ? "loader-circle" : "refresh-cw", S.busy.ping ? "spin" : "")}Kiểm tra kết nối</button></div>
             ${conn}
           </div></section>
-        <section><div class="section-head"><div class="icon-tile sm">${icon("citrus")}</div><h2>Lemon Squeezy và giá</h2></div>
+        <section><div class="section-head"><div class="icon-tile sm">${icon("tag")}</div><h2>Giá</h2></div>
           <div class="card">
-            <div class="set-row"><div class="grow"><b>Variant ID dùng chung</b><span class="muted small">Một sản phẩm “Ebook” trên Lemon Squeezy dùng cho mọi ebook. Web tự đặt tên và giá từng cuốn lúc khách thanh toán.</span></div>
-              <input class="input" style="width:150px" inputmode="numeric" value="${esc(S.config.shared_variant_id)}" data-config="shared_variant_id" placeholder="ví dụ 2204367" aria-label="Variant ID dùng chung"></div>
-            <div class="card-div"></div>
-            <div class="set-row"><div class="grow"><b>Giá mặc định</b><span class="muted small">Gán cho ebook mới quét. Sửa riêng từng cuốn ngay trên danh sách.</span></div>
+            <div class="set-row"><div class="grow"><b>Giá mặc định</b><span class="muted small">Gán cho ebook mới quét. Sửa riêng từng cuốn ngay trên danh sách. Khách thanh toán bằng PayPal trên web.</span></div>
               <div class="price"><span>$</span><input class="input" inputmode="decimal" value="${money(S.config.default_price)}" data-config="default_price" aria-label="Giá mặc định"></div></div>
+          </div></section>
+        <section><div class="section-head"><div class="icon-tile sm">${icon("file-archive")}</div><h2>Nén file khi tải lên</h2></div>
+          <div class="card">
+            <div class="set-row"><div class="grow"><b>Nén PDF</b><span class="muted small">${PDF_MODES[S.config.pdf_shrink || "safe"].hint}</span></div>
+              <div class="seg" role="group" aria-label="Nén PDF">${Object.entries(PDF_MODES).map(([id, m]) => `<button class="${(S.config.pdf_shrink || "safe") === id ? "active" : ""}" data-act="pdf-mode" data-mode="${id}">${m.label}</button>`).join("")}</div></div>
+            <div class="card-div"></div>
+            <div class="set-row"><div class="grow"><b>Ảnh bìa và ảnh sản phẩm</b><span class="muted small">Luôn đổi sang WebP vừa đủ nét (bìa ebook tối đa 640×960) — nhẹ hơn JPG/PNG nhiều lần, web tải nhanh hơn và tốn ít băng thông Supabase.</span></div>
+              <span class="pill ok">${icon("circle-check")}Tự động</span></div>
+            <div class="card-div"></div>
+            <div class="set-row"><div class="grow"><b>Nén lại ảnh đang có trên web</b><span class="muted small">Đổi các ảnh JPG/PNG đã đăng trước đây sang WebP. Ảnh giữ nguyên nội dung, chỉ nhẹ hơn; sản phẩm không đổi gì khác. Mất khoảng 1–2 phút.</span></div>
+              <button class="btn outline sm" data-act="lighten" ${S.busy.lighten ? "disabled" : ""}>${icon(S.busy.lighten ? "loader-circle" : "image-down", S.busy.lighten ? "spin" : "")}${S.busy.lighten ? "Đang nén…" : "Nén lại ảnh"}</button></div>
+            ${S.lighten ? `<div class="note ${S.lighten.error || S.lighten.failed?.length ? "bad" : "ok"}">${icon(S.lighten.error ? "circle-alert" : "circle-check")}<span>${S.lighten.error ? esc(S.lighten.error)
+              : `${S.lighten.done ? `Đã nén ${S.lighten.done} sản phẩm: ${fmtSize(S.lighten.before)} → ${fmtSize(S.lighten.after)}.` : "Không còn ảnh nào cần nén."}${S.lighten.failed?.length ? ` Không nén được: ${esc(S.lighten.failed.join(", "))}.` : ""}`}</span></div>` : ""}
           </div></section>
         <section><div class="section-head"><div class="icon-tile sm">${icon("palette")}</div><h2>Giao diện</h2></div>
           <div class="card"><div class="theme-grid">${Object.entries(THEMES).map(([id, t]) => `<button class="theme ${S.config.theme === id ? "active" : ""}" data-act="theme" data-theme="${id}">
@@ -522,14 +539,13 @@ const PAGES = {
         <section><div class="section-head"><div class="icon-tile sm">${icon("wrench")}</div><h2>Cài đặt lần đầu</h2></div>
           <div class="card"><div class="steps">
             ${step("Tạo mã bí mật", "Vào Cài đặt › Tạo mã › Copy mã. Mở Supabase › dự án dark-network › Edge Functions › Secrets, thêm secret tên <code>TOOL_API_TOKEN</code> và dán mã vào.")}
-            ${step("Tạo một sản phẩm Ebook chung trên Lemon Squeezy", "Chỉ tạo một lần: tên bất kỳ (ví dụ “Dark Network Ebook”), giá bất kỳ, không cần đính kèm file. Copy Variant ID của nó, dán vào Cài đặt › Variant ID dùng chung.")}
             ${step("Kiểm tra kết nối", "Cài đặt › Kiểm tra kết nối phải báo xanh. Nếu báo website chưa có mã bí mật thì bước 1 chưa xong.")}
           </div></div></section>
         <section><div class="section-head"><div class="icon-tile sm">${icon("book-open")}</div><h2>Đăng ebook</h2></div>
           <div class="card"><div class="steps">
             ${step("Quét thư mục", "Để PDF và ảnh bìa cùng tên trong một thư mục (<code>Ten-Sach.pdf</code> + <code>Ten-Sach.png</code>). Sửa tên hiển thị và giá ngay trên từng dòng.")}
             ${step("Viết mô tả", "Bấm Viết mô tả › Copy prompt › dán vào Claude hoặc ChatGPT › copy câu trả lời › dán lại vào tool › Lưu. Tool tự chuyển sang cuốn kế tiếp.")}
-            ${step("Đăng lên web", "Bấm nút lớn phía dưới. Tool nén ảnh bìa, tải PDF lên kho riêng tư và tạo sản phẩm ở trạng thái <b>bản nháp</b>. Vào trang Admin của web xem lại rồi chuyển sang Published.")}
+            ${step("Đăng lên web", "Bấm nút lớn phía dưới. Tool nén ảnh bìa sang WebP, nén PDF (Cài đặt › Nén file), tải PDF lên kho riêng tư và tạo sản phẩm ở trạng thái <b>bản nháp</b>. Vào trang Admin của web xem lại rồi chuyển sang Published.")}
           </div></div></section>
         <section><div class="section-head"><div class="icon-tile sm">${icon("shirt")}</div><h2>Đăng sản phẩm POD</h2></div>
           <div class="card"><div class="steps">
@@ -632,7 +648,7 @@ async function publish(kind, id, { ask = true, overwrite = false } = {}) {
   try {
     const res = await api("/api/item/publish", { kind, id, overwrite });
     Object.assign(find(kind, id), res.item);
-    return true;
+    return res;
   } catch (e) {
     if (e.code === "exists" && ask) {
       delete S.busy[id]; render();
@@ -651,9 +667,15 @@ async function publishAll(kind) {
   const todo = list(kind).filter((i) => i.has_listing && (kind === "pod" || i.has_cover));
   S.running = true; render();
   let ok = 0;
-  for (const it of todo) if (await publish(kind, it.id, { ask: false })) ok += 1;
+  const pdf = { before: 0, after: 0 };
+  for (const it of todo) {
+    const res = await publish(kind, it.id, { ask: false });
+    if (!res) continue;
+    ok += 1;
+    if (res.pdf) { pdf.before += res.pdf.before; pdf.after += res.pdf.after; }
+  }
   S.running = false; render();
-  toast(ok === todo.length ? "success" : "error", `Đã đăng ${ok}/${todo.length} sản phẩm lên web ở dạng bản nháp.${ok < todo.length ? " Xem lỗi ở từng dòng." : ""}`);
+  toast(ok === todo.length ? "success" : "error", `Đã đăng ${ok}/${todo.length} sản phẩm lên web ở dạng bản nháp.${pdfText(pdf)}${ok < todo.length ? " Xem lỗi ở từng dòng." : ""}`);
 }
 async function scan(folder) {
   try {
@@ -716,7 +738,7 @@ const ACTIONS = {
   "chat-send"() { sendChat(); },
   restore() { runRestore(); },
   write(el, row) { openWriter(row.dataset.kind, row.dataset.id); },
-  publish(el, row) { publish(row.dataset.kind, row.dataset.id).then((ok) => ok && toast("success", "Đã đăng lên web ở dạng bản nháp.")); },
+  publish(el, row) { publish(row.dataset.kind, row.dataset.id).then((res) => res && toast("success", `Đã đăng lên web ở dạng bản nháp.${pdfText(res.pdf)}`)); },
   "publish-all"(el) { publishAll(el.dataset.kind); },
   async remove(el, row) { await api("/api/item/remove", { kind: row.dataset.kind, id: row.dataset.id }); S.pods = S.pods.filter((i) => i.id !== row.dataset.id); render(); },
   async "pods-add"() {
@@ -740,6 +762,12 @@ const ACTIONS = {
     $("#t-val").focus();
   },
   async "token-save"() { try { await api("/api/token/set", { token: $("#t-val").value }); S.hasToken = true; closeDialog(); toast("success", "Đã lưu mã."); render(); } catch (e) { $("#t-err").textContent = e.message; } },
+  async "pdf-mode"(el) { setState(await api("/api/config", { pdf_shrink: el.dataset.mode })); render(); },
+  async lighten() {
+    S.busy.lighten = true; S.lighten = null; render();
+    try { S.lighten = await api("/api/site/lighten"); } catch (e) { S.lighten = { error: e.message }; }
+    delete S.busy.lighten; render();
+  },
   async ping() { S.busy.ping = true; render(); try { S.ping = await api("/api/site/ping"); } catch (e) { S.ping = { error: e.message }; } delete S.busy.ping; render(); },
   open(el) { api("/api/open", { url: el.dataset.url }).catch((e) => toast("error", e.message)); },
   "update-check"() { checkUpdate(false); },

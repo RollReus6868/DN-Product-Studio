@@ -1,5 +1,15 @@
-# DN Product Studio 1.4.0
+# DN Product Studio 1.5.0
 
+- **Ảnh nhẹ hơn**: ảnh bìa ebook và ảnh sản phẩm POD được đổi sang **WebP** trước khi tải lên (bìa tối đa 640×960). Cùng độ nét trên web nhưng nhẹ hơn JPG nhiều lần, web tải nhanh hơn và tốn ít băng thông Supabase.
+- **Nén PDF** trước khi tải lên (Cài đặt › Nén file khi tải lên):
+  - *Giữ nguyên chất lượng* (mặc định): chữ và ảnh trong sách giữ nguyên, chỉ bỏ phần thừa trong file.
+  - *Nén mạnh*: lưu lại các ảnh lớn trong sách nhẹ hơn, hợp với sách nhiều ảnh hoặc bản scan.
+  - *Tắt*: tải đúng file gốc.
+  Nếu bản nén không nhẹ hơn, tool giữ file gốc. Tên file giữ nguyên. Sau khi đăng, tool báo PDF đã nhẹ từ bao nhiêu xuống bao nhiêu.
+- **Nén lại ảnh đang có trên web** (Cài đặt): một nút đổi các ảnh JPG/PNG đã đăng trước đây sang WebP, không đổi gì khác của sản phẩm.
+- Bỏ phần **Lemon Squeezy** (Variant ID) khỏi Cài đặt và Hướng dẫn: web giờ thanh toán bằng PayPal, không cần cài gì thêm.
+
+Từ bản 1.4.0:
 - **Phân tích** (thay cho Lượt truy cập), giống Google Analytics: người dùng, người dùng mới, phiên, lượt xem, thời gian tương tác, tỷ lệ tương tác (so với kỳ trước); biểu đồ người dùng mỗi ngày; **đang hoạt động** trong 30 phút qua; người dùng theo **quốc gia**; lượt xem theo **trang**; phiên theo **kênh** (YouTube, Google, trực tiếp…); bảng **nguồn truy cập**. Chọn 7, 28 hoặc 90 ngày.
 - **Giỏ & thanh toán** (mục mới): số lần thêm vào giỏ, số lần vào trang thanh toán, số lần thanh toán thành công; phễu mua hàng; bảng theo từng sách; danh sách từng lần vào thanh toán và kết quả (thành công / chưa thanh toán / hoàn tiền).
 - **Email đăng ký** (mục mới): tổng số email, số email mới, danh sách và nút copy tất cả.
@@ -34,17 +44,16 @@ Các tính năng từ bản 1.0.0:
 
 - **Ebook**: quét thư mục PDF + ảnh bìa cùng tên, soạn prompt để Claude/ChatGPT viết mô tả, đặt giá, nén ảnh bìa, tải PDF lên kho riêng tư và tạo sản phẩm **bản nháp** trên web.
 - **POD (Spring)**: dán link Spring, tool lấy tên, giá, ảnh rồi đăng bản nháp lên web.
-- **Lemon Squeezy**: mọi ebook dùng chung một Variant ID; web tự đặt tên và giá từng cuốn lúc thanh toán.
 - Tự cập nhật qua GitHub Releases, giao diện sáng/tối, 7 bộ màu.
 
 ## Tải bản nào?
 
 | Máy của bạn | File |
 |---|---|
-| Windows (khuyên dùng) | `DNProductStudio-1.3.0-windows-setup.exe` |
-| Windows, không muốn cài | `DNProductStudio-1.3.0-windows-portable.exe` |
-| Mac chip Apple (M1 trở lên) | `DNProductStudio-1.3.0-mac-arm64.zip` |
-| Mac chip Intel | `DNProductStudio-1.3.0-mac-x64.zip` |
+| Windows (khuyên dùng) | `DNProductStudio-1.5.0-windows-setup.exe` |
+| Windows, không muốn cài | `DNProductStudio-1.5.0-windows-portable.exe` |
+| Mac chip Apple (M1 trở lên) | `DNProductStudio-1.5.0-mac-arm64.zip` |
+| Mac chip Intel | `DNProductStudio-1.5.0-mac-x64.zip` |
 
 Windows có thể hiện “Windows protected your PC”: bấm **More info › Run anyway** (app chưa mua chữ ký số).
 Mac: giải nén, kéo vào Applications, lần đầu bấm chuột phải › **Open**.

@@ -24,7 +24,8 @@ datas = [("ui", "ui"), ("assets/app.png", "assets"), ("assets/app.ico", "assets"
 datas += collect_data_files("certifi")
 
 hiddenimports = collect_submodules("keyring.backends") + [
-    "main", "server", "storage", "scan", "pdfread", "prompts", "spring", "webstore",
+    "main", "server", "storage", "scan", "pdfread", "prompts", "spring", "webstore", "shrink",
+    "PIL.WebPImagePlugin",
     "updater", "app_info", "selfcheck",
 ]
 if IS_WIN:

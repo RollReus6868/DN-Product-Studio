@@ -1,1 +1,1 @@
-1.4.0  Phan tich kieu Google Analytics, gio hang va thanh toan, email dang ky.
+1.5.0  Nen anh bia/anh san pham sang WebP, nen PDF truoc khi tai len, nen lai anh dang co tren web, bo Lemon Squeezy.

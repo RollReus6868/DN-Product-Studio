@@ -1,4 +1,4 @@
-# DN Product Studio 1.4.0
+# DN Product Studio 1.5.0
 
 Tool đăng sản phẩm lên website Dark Network: **ebook** (PDF + ảnh bìa) và **POD qua Spring**. Chạy trên Windows và macOS, tự cập nhật.
 
@@ -11,8 +11,7 @@ Vào mục **Releases** của kho này, tải file theo bảng trong ghi chú ph
 Cài đặt một lần (trang **Hướng dẫn** trong tool ghi lại từng bước):
 
 1. **Cài đặt › Tạo mã** rồi dán mã vào Supabase › dự án của web › Edge Functions › **Secrets**, tên `TOOL_API_TOKEN`.
-2. Trên Lemon Squeezy tạo **một** sản phẩm “Ebook” chung, dán Variant ID của nó vào **Cài đặt**.
-3. **Kiểm tra kết nối** phải báo xanh.
+2. **Kiểm tra kết nối** phải báo xanh.
 
 Mỗi lô sản phẩm:
 
@@ -24,9 +23,15 @@ Mỗi lô sản phẩm:
 
 Sau đó vào trang Admin của web xem lại và chuyển sang Published. Tool không bao giờ tự xuất bản hay xoá; sản phẩm đã có trên web chỉ bị ghi đè khi bạn đồng ý.
 
-## Tool làm gì với Lemon Squeezy
+## Thanh toán
 
-API của Lemon Squeezy không cho tạo sản phẩm. Vì vậy mọi ebook dùng chung một Variant ID; lúc khách bấm Buy Now, website tạo phiên thanh toán với **tên và giá của đúng cuốn đó** (hàm `createEbookCheckout` của web).
+Khách trả tiền bằng **PayPal** ngay trên web (từ 11/2026, thay Lemon Squeezy). Web lấy tên và giá từ chính sản phẩm, nên tool chỉ cần đăng sản phẩm với giá đúng; không có gì phải cài cho phần thanh toán.
+
+## Nén file (Cài đặt › Nén file khi tải lên)
+
+- **Ảnh bìa ebook** đổi sang WebP, tối đa 640×960; **ảnh POD** WebP tối đa 1000×1500. Nhẹ hơn JPG/PNG nhiều lần.
+- **PDF**: *Giữ nguyên chất lượng* (mặc định) nén mà không đổi chữ hay ảnh; *Nén mạnh* lưu lại các ảnh lớn trong sách ở JPEG 80%, tối đa 1800 px; *Tắt* tải đúng file gốc. Bản nén chỉ được dùng khi nhẹ hơn ít nhất 3% và mở được đủ số trang; tên file giữ nguyên.
+- **Nén lại ảnh đang có trên web**: đổi các ảnh JPG/PNG đã đăng trước đây (trong kho Supabase của web) sang WebP và gắn vào đúng sản phẩm (hành động `media_list` / `set_media` của `toolApi`). Ảnh trong thư mục `/img` của web và ảnh đã là WebP được bỏ qua.
 
 ## Chạy từ mã nguồn
 
@@ -40,7 +45,8 @@ launcher.py   điểm khởi động, ghi DNProductStudio_crash.log khi lỗi   
 main.py       mở cửa sổ (pywebview) trên máy chủ nội bộ                 server.py    API nội bộ 127.0.0.1 + phục vụ ui/
 scan.py       ghép PDF với ảnh bìa cùng tên                             pdfread.py   số trang + chữ của PDF
 prompts.py    soạn prompt, đọc và kiểm tra câu trả lời JSON             spring.py    đọc trang Spring (JSON-LD, Open Graph)
-webstore.py   gọi hàm toolApi của web, nén ảnh, tải file, đăng nháp     storage.py   cấu hình, danh sách, mã bí mật (keyring)
+webstore.py   gọi hàm toolApi của web, tải file, đăng nháp              storage.py   cấu hình, danh sách, mã bí mật (keyring)
+shrink.py     nén ảnh sang WebP, nén PDF
 updater.py    tự cập nhật qua GitHub Releases                           selfcheck.py tự kiểm tra bản đã đóng gói
 ui/           giao diện (HTML/CSS/JS, phong cách Youwee)                tools/fake_site.py  website giả lập để thử
 ```

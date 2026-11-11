@@ -99,10 +99,9 @@ def api_config(body: dict) -> dict:
             raise ApiError("Giá mặc định phải là số, ví dụ 9.99") from exc
         if not 0 < changes["default_price"] < 10000:
             raise ApiError("Giá mặc định phải lớn hơn 0.")
-    if "shared_variant_id" in changes:
-        changes["shared_variant_id"] = str(changes["shared_variant_id"]).strip()
-        if changes["shared_variant_id"] and not changes["shared_variant_id"].isdigit():
-            raise ApiError("Variant ID chỉ gồm chữ số (ví dụ 2204367).")
+    changes.pop("shared_variant_id", None)   # Lemon Squeezy is gone (the site sells through PayPal)
+    if "pdf_shrink" in changes and changes["pdf_shrink"] not in ("off", "safe", "strong"):
+        raise ApiError("Kiểu nén PDF không hợp lệ.")
     storage.save_config(changes)
     return api_state({})
 
@@ -217,6 +216,7 @@ def api_item_publish(body: dict) -> dict:
     items, item = _get(kind, body.get("id"))
     cfg = storage.load_config()
     fn = webstore.publish_ebook if kind == "ebook" else webstore.publish_pod
+    pdf_sig = (item.get("web") or {}).get("pdf_sig")
     try:
         fn(item, cfg, _client(cfg), overwrite=bool(body.get("overwrite")))
     except webstore.SiteError as exc:
@@ -228,7 +228,9 @@ def api_item_publish(body: dict) -> dict:
             if body["id"] in fresh[kind]:
                 fresh[kind][body["id"]]["web"] = item.get("web") or {}
                 storage.save_items(fresh)
-    return {"item": _public(item, kind)}
+    web = item.get("web") or {}
+    # sizes of the PDF this call uploaded (before / after compression), for the message in the window
+    return {"item": _public(item, kind), "pdf": web.get("pdf_sizes") if web.get("pdf_sig") != pdf_sig else None}
 
 
 def api_pods_add(body: dict) -> dict:
@@ -279,7 +281,7 @@ def api_restore_one(body: dict) -> dict:
     if not path:
         raise ApiError("Không thấy file này trong thư mục đang chọn.")
     try:
-        return {"attached": webstore.restore_pdf(str(path), _client(cfg))}
+        return {"attached": webstore.restore_pdf(str(path), _client(cfg), cfg)}
     except webstore.SiteError as exc:
         raise ApiError(str(exc), exc.code) from exc
 
@@ -289,6 +291,14 @@ def api_site_ping(_body: dict) -> dict:
     cfg = storage.load_config()
     try:
         return _client(cfg).ping()
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
+
+
+def api_site_lighten(_body: dict) -> dict:
+    """Swap the heavy JPG/PNG pictures already on the site for WebP copies (one run, a minute or two)."""
+    try:
+        return webstore.lighten_site_pictures(_client(storage.load_config()))
     except webstore.SiteError as exc:
         raise ApiError(str(exc), exc.code) from exc
 
@@ -416,7 +426,7 @@ ROUTES = {
     "/api/item/prompt": api_item_prompt, "/api/item/reply": api_item_reply,
     "/api/item/listing": api_item_listing, "/api/item/publish": api_item_publish,
     "/api/restore/list": api_restore_list, "/api/restore/one": api_restore_one,
-    "/api/site/ping": api_site_ping, "/api/orders": api_orders, "/api/analytics": api_analytics,
+    "/api/site/ping": api_site_ping, "/api/site/lighten": api_site_lighten, "/api/orders": api_orders, "/api/analytics": api_analytics,
     "/api/chat/list": api_chat_list, "/api/chat/thread": api_chat_thread, "/api/chat/reply": api_chat_reply, "/api/token/generate": api_token_generate,
     "/api/token/set": api_token_set, "/api/token/show": api_token_show, "/api/open": api_open,
     "/api/update/check": api_update_check, "/api/update/install": api_update_install,

@@ -13,7 +13,7 @@ DEFAULTS = {
     # the website's entry point for this tool (Supabase edge function "toolApi")
     "site_api_url": os.environ.get("DNPS_SITE_API") or "https://qztnndbhauzawchfhcui.supabase.co/functions/v1/toolApi",
     "default_price": 9.99,
-    "shared_variant_id": "",
+    "pdf_shrink": "safe",   # PDFs before upload: "off", "safe" (lossless) or "strong" (re-saves big pictures)
     "ebook_folder": "",
     "theme": "gold",
     "mode": "dark",

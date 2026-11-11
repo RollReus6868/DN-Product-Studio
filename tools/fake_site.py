@@ -27,6 +27,7 @@ class FakeSite:
         self.analytics_days: list[int] = []  # the ranges the tool asked for
         self.files: list[dict] = []       # uploaded files, in order
         self.tickets: dict[str, dict] = {}
+        self.blobs: dict[str, bytes] = {}  # public files by their address path (served back by GET)
         self.fail_upload = False
         site = self
 
@@ -52,9 +53,20 @@ class FakeSite:
                 boundary = (self.headers.get("Content-Type") or "").split("boundary=")[1].encode()
                 part = next(p for p in raw.split(b"--" + boundary) if b'name="file"' in p)
                 data = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0]
+                if not ticket["private"]:
+                    site.blobs[ticket["ref"][len(site.base):]] = data
                 site.files.append({**ticket, "size": len(data), "head": data[:4],
                                    "cache_field": b'name="cacheControl"\r\n\r\n31536000' in raw})
                 return self._json(200, {"Key": ticket["ref"]})
+
+            def do_GET(self):  # noqa: N802 - public pictures, as the site's storage serves them
+                data = site.blobs.get(self.path)
+                if data is None:
+                    return self._json(404, {"error": "not found"})
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
 
             def do_POST(self):  # noqa: N802
                 raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
@@ -107,6 +119,25 @@ class FakeSite:
                     for r in hit:
                         r["secure_file_uri"] = body.get("file_uri")
                     return self._json(200, {"attached": [r["title"] for r in hit]})
+                if action == "media_list":
+                    return self._json(200, {"items": [
+                        *[{"entity": "Ebook", "id": r["id"], "title": r["title"], "images": [r["cover_image"]]}
+                          for r in ebooks if r.get("cover_image")],
+                        *[{"entity": "Product", "id": r["id"], "title": r["title"], "images": r["images"]}
+                          for r in site.records["Product"] if r.get("images")]]})
+                if action == "set_media":
+                    own = f"{site.base}/storage/v1/object/public/public-files/"
+                    images = body.get("images") if isinstance(body.get("images"), list) else []
+                    if body.get("entity") not in site.records or not images or not all(str(u).startswith(own) for u in images):
+                        return self._json(400, {"error": "Bad images"})
+                    row = next((r for r in site.records[body["entity"]] if r["id"] == body.get("id")), None)
+                    if row is None:
+                        return self._json(404, {"error": "Not found"})
+                    current = [row["cover_image"]] if body["entity"] == "Ebook" else row["images"]
+                    if len(current) != len(images):
+                        return self._json(409, {"error": "Picture count changed"})
+                    row.update({"cover_image": images[0]} if body["entity"] == "Ebook" else {"images": images})
+                    return self._json(200, {"ok": True})
                 entity = body.get("entity")
                 if entity not in site.records:
                     return self._json(400, {"error": "Unknown entity"})

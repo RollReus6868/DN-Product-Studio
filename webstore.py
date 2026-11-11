@@ -6,14 +6,14 @@ publish or delete.
 """
 from __future__ import annotations
 
-import io
 import mimetypes
 import os
-import tempfile
+import re
 from pathlib import Path
 
 import requests
 
+import shrink
 from app_info import APP_ID, APP_VERSION
 from scan import slugify
 
@@ -109,6 +109,19 @@ class SiteClient:
     def chat_reply(self, conversation_id: str, body: str) -> dict:
         return self._call(30, json={"action": "chat_reply", "conversation_id": conversation_id, "body": body}).get("message") or {}
 
+    # ---- pictures already on the site (to replace heavy ones with lighter copies)
+    def media_list(self) -> list[dict]:
+        """[{entity: "Ebook" | "Product", id, title, images: [url, ...]}]"""
+        return self._call(60, json={"action": "media_list"}).get("items") or []
+
+    def set_media(self, entity: str, record_id: str, images: list[str]) -> None:
+        self._call(60, json={"action": "set_media", "entity": entity, "id": record_id, "images": images})
+
+    def is_own_picture(self, url: str) -> bool:
+        """A picture in this site's own storage (not the site's built-in /img files or another site)."""
+        base = self.url.split("/functions/")[0]
+        return isinstance(url, str) and url.startswith(base + "/storage/v1/object/public/public-files/")
+
     def pending_pdfs(self) -> list[dict]:
         """Books on the site whose PDF still has to be uploaded again: [{title, file_name}]."""
         return self._call(60, json={"action": "pending_pdfs"}).get("items") or []
@@ -123,32 +136,88 @@ def file_sig(path: str) -> str:
     return f"{st.st_size}-{st.st_mtime_ns}"
 
 
-COVER_BOX = (640, 960)
+COVER_BOX, PHOTO_BOX = shrink.COVER_BOX, shrink.PHOTO_BOX
 
 
-def cover_jpeg(path: str, box: tuple[int, int] = (1000, 1500)) -> bytes:
-    """Web-ready picture: RGB JPEG no larger than box. Book covers use COVER_BOX
-    (a 3 MB PNG becomes ~150 KB), which is twice the size the site shows them at."""
-    from PIL import Image
-
-    with Image.open(path) as im:
-        im = im.convert("RGB")
-        im.thumbnail(box)
-        buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=86, progressive=True, optimize=True)
-        return buf.getvalue()
+def cover_webp(source, box: tuple[int, int] = PHOTO_BOX) -> bytes:
+    """Web-ready picture (WebP, no larger than box). Book covers use COVER_BOX: a 3 MB PNG
+    becomes ~60-100 KB, twice the size the site shows them at, so it stays sharp on phones."""
+    return shrink.web_image(source, box, 80 if box == COVER_BOX else 82)
 
 
 def _safe_name(stem: str, ext: str) -> str:
     return (slugify(stem) or "file") + ext
 
 
-def restore_pdf(path: str, client: SiteClient) -> list[str]:
+def pdf_for_upload(path: str, cfg: dict | None) -> tuple[object, dict]:
+    """-> (bytes or an open file, {"before", "after"}). The lighter copy only when the setting is on
+    and it is really smaller; otherwise the file exactly as it is."""
+    mode = (cfg or {}).get("pdf_shrink", "safe")     # "off" | "safe" (lossless) | "strong"
+    if mode in ("safe", "strong"):
+        data, before, after = shrink.shrink_pdf(path, strong=mode == "strong")
+        if data is not None:
+            return data, {"before": before, "after": after}
+    size = os.path.getsize(path)
+    return open(path, "rb"), {"before": size, "after": size}  # noqa: SIM115 - closed by _upload_pdf
+
+
+def _upload_pdf(path: str, cfg: dict | None, client: SiteClient) -> tuple[str, dict]:
+    content, sizes = pdf_for_upload(path, cfg)
+    try:
+        return client.upload(Path(path).name, content, True), sizes   # buyers download it under its own name
+    finally:
+        if hasattr(content, "close"):
+            content.close()
+
+
+def restore_pdf(path: str, client: SiteClient, cfg: dict | None = None) -> list[str]:
     """Upload one PDF and attach it to the book(s) on the site that are waiting for that file name."""
-    name = Path(path).name
-    with open(path, "rb") as f:
-        uri = client.upload(name, f, True)   # buyers download it under this, its own name
-    return client.attach_pdf(name, uri)
+    uri, _sizes = _upload_pdf(path, cfg, client)
+    return client.attach_pdf(Path(path).name, uri)
+
+
+def _is_light(url: str) -> bool:
+    return url.split("?")[0].lower().endswith(".webp")
+
+
+def lighten_site_pictures(client: SiteClient, progress=None) -> dict:
+    """Replace the heavy pictures already on the site (JPG/PNG covers and product photos in its own
+    storage) with WebP copies. The record keeps everything else; the old file stays in storage.
+    -> {"done", "skipped", "failed": [titles], "before", "after"}"""
+    items = client.media_list()
+    todo = [i for i in items if any(client.is_own_picture(u) and not _is_light(u) for u in i["images"])]
+    out = {"done": 0, "skipped": len(items) - len(todo), "failed": [], "before": 0, "after": 0}
+    for n, item in enumerate(todo, 1):
+        if progress:
+            progress(n, len(todo), item.get("title") or "")
+        box = COVER_BOX if item["entity"] == "Ebook" else PHOTO_BOX
+        try:
+            new, before, after = [], 0, 0
+            for url in item["images"]:
+                if not client.is_own_picture(url) or _is_light(url):
+                    new.append(url)
+                    continue
+                r = requests.get(url, timeout=60)
+                r.raise_for_status()
+                webp = cover_webp(r.content, box)
+                if len(webp) >= len(r.content):      # already small: keep it
+                    new.append(url)
+                    continue
+                stem = re.sub(r"^[0-9a-f]{8,9}_", "", Path(url.split("?")[0]).stem)
+                new.append(client.upload(_safe_name(stem, ".webp"), webp, False))
+                before, after = before + len(r.content), after + len(webp)
+            if new != item["images"]:
+                client.set_media(item["entity"], item["id"], new)
+                out["done"] += 1
+                out["before"] += before
+                out["after"] += after
+            else:
+                out["skipped"] += 1
+        except (requests.RequestException, SiteError, OSError, ValueError) as exc:
+            out["failed"].append(f"{item.get('title') or item['id']} ({exc.__class__.__name__})")
+        except Exception as exc:  # noqa: BLE001 - Pillow raises many types on a broken picture
+            out["failed"].append(f"{item.get('title') or item['id']} ({exc.__class__.__name__})")
+    return out
 
 
 # ------------------------------------------------------------------ publishing
@@ -169,18 +238,15 @@ def publish_ebook(item: dict, cfg: dict, client: SiteClient, overwrite: bool = F
 
     sig = file_sig(item["cover"])
     if web.get("cover_sig") != sig:
-        web["cover_url"] = client.upload(_safe_name(Path(item["cover"]).stem, ".jpg"), cover_jpeg(item["cover"], COVER_BOX), False)
+        web["cover_url"] = client.upload(_safe_name(Path(item["cover"]).stem, ".webp"), cover_webp(item["cover"], COVER_BOX), False)
         web["cover_sig"] = sig
     sig = file_sig(item["pdf"])
     if web.get("pdf_sig") != sig:
-        with open(item["pdf"], "rb") as f:
-            web["file_uri"] = client.upload(Path(item["pdf"]).name, f, True)   # keeps its own name
+        web["file_uri"], web["pdf_sizes"] = _upload_pdf(item["pdf"], cfg, client)
         web["pdf_sig"] = sig
 
     data = {"title": item["title"], "slug": slug, "price": float(item.get("price") or 0),
             "cover_image": web["cover_url"], "secure_file_uri": web["file_uri"], **listing}
-    if cfg.get("shared_variant_id"):
-        data["lemon_squeezy_variant_id"] = str(cfg["shared_variant_id"]).strip()
     res = client.upsert("Ebook", data, web.get("id", ""), overwrite)
     web.update(id=res.get("id", ""), status=res.get("status", "draft"), slug=slug)
     return web
@@ -207,15 +273,11 @@ def publish_pod(item: dict, cfg: dict, client: SiteClient, overwrite: bool = Fal
                 r.raise_for_status()
             except requests.RequestException as exc:
                 raise SiteError(f"Không tải được ảnh {i} từ Spring ({exc.__class__.__name__}).", "network") from exc
-            with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as tmp:
-                tmp.write(r.content)
             try:
-                jpeg = cover_jpeg(tmp.name)
+                picture = cover_webp(r.content, PHOTO_BOX)
             except Exception as exc:  # noqa: BLE001 - Pillow raises many types on a non-image
                 raise SiteError(f"Ảnh {i} từ Spring không đọc được.", "incomplete") from exc
-            finally:
-                os.unlink(tmp.name)
-            urls.append(client.upload(f"{slug}-{i}.jpg", jpeg, False))
+            urls.append(client.upload(f"{slug}-{i}.webp", picture, False))
         web["image_urls"], web["images_src"] = urls, list(item["images"])
 
     data = {"title": item["title"], "slug": slug, "price": float(item["price"]),

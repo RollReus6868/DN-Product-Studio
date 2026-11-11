@@ -86,6 +86,7 @@ def run() -> int:
         import server
         import updater
         import webstore
+        import shrink
         from app_info import APP_VERSION
 
         report.update(version=APP_VERSION, platform=sys.platform, machine=platform.machine(),
@@ -118,10 +119,12 @@ def run() -> int:
                 "subtitle": "s", "description": "<p>d</p>", "what_you_learn": ["a"], "who_for": "<ul><li>x</li></ul>",
                 "faq": [{"question": "q", "answer": "a"}], "seo_title": "t", "meta_description": "m"}), "ebook")
             report["prompt_chars"] = len(prompt)
-            jpeg = webstore.cover_jpeg(eb["cover"])
-            report["cover_bytes"] = len(jpeg)
-            if not (listing["description"] and jpeg[:2] == b"\xff\xd8"):
-                report["errors"].append("listing parse / cover conversion failed")
+            webp = webstore.cover_webp(eb["cover"], webstore.COVER_BOX)
+            report["cover_bytes"] = len(webp)
+            if not (listing["description"] and webp[:4] == b"RIFF" and webp[8:12] == b"WEBP"):
+                report["errors"].append("listing parse / cover conversion (WebP) failed")
+            _data, before, after = shrink.shrink_pdf(eb["pdf"], strong=True)
+            report["pdf_shrink"] = f"{before}->{after}"
 
         try:
             import keyring
