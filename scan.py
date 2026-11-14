@@ -47,5 +47,6 @@ def scan_designs(folder: str) -> list[dict]:
     root = Path(folder).expanduser()
     if not root.is_dir():
         raise ValueError(f"Không thấy thư mục: {folder}")
-    files = sorted(p for p in root.iterdir() if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in DESIGN_EXT)
+    files = sorted((p for p in root.iterdir() if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in DESIGN_EXT),
+                   key=lambda p: p.name.lower())   # A-Z on every system (Windows ignores case, Linux does not)
     return [{"id": str(p), "title": title_from_stem(p.stem), "file": str(p)} for p in files]

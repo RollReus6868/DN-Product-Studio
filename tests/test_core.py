@@ -68,7 +68,7 @@ class ScanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             for n in ("Lion_of-Judah.png", "cross.JPG", "notes.txt", ".hidden.png", "art.pdf"):
                 (Path(td) / n).write_bytes(b"x")
-            self.assertEqual([d["title"] for d in scan.scan_designs(td)], ["Lion of Judah", "cross"])
+            self.assertEqual([d["title"] for d in scan.scan_designs(td)], ["cross", "Lion of Judah"])
         with self.assertRaises(ValueError):
             scan.scan_designs(td)
 
