@@ -1,1 +1,1 @@
-1.5.0  Nen anh bia/anh san pham sang WebP, nen PDF truoc khi tai len, nen lai anh dang co tren web, bo Lemon Squeezy.
+1.6.0  Dang ao POD qua Printify tu file thiet ke: chon loai trong danh muc, mau, size, gia; tao san pham Printify va ban nhap tren web.

@@ -7,13 +7,16 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 EBOOK_KEYS = {"subtitle": str, "description": str, "what_you_learn": list, "who_for": str, "faq": list,
               "seo_title": str, "meta_description": str}
 POD_KEYS = {"description": str, "bible_inspiration": str, "story_behind_design": str, "product_info": str,
             "seo_title": str, "meta_description": str}
+DESIGN_KEYS = {"title": str, **POD_KEYS}
 REQUIRED = {"ebook": ("description", "what_you_learn", "seo_title", "meta_description"),
-            "pod": ("description", "seo_title", "meta_description")}
+            "pod": ("description", "seo_title", "meta_description"),
+            "design": ("title", "description", "seo_title", "meta_description")}
 
 _RULES = """Rules:
 - Write in English, for the Dark Network store (Bible-discovery books and gifts for thoughtful readers).
@@ -88,6 +91,47 @@ Return JSON with exactly these keys:
 """
 
 
+def _plain(html: str, limit: int = 1500) -> str:
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    return _cut(text.replace("&nbsp;", " "), limit)
+
+
+def design_prompt(item: dict, product: dict) -> str:
+    """A design (the attached picture) printed on a Printify product. product = the site's pod_blueprint
+    answer: title, brand, model, description (the blank's facts), embroidery."""
+    method = "embroidered" if product.get("embroidery") else "printed"
+    schema = {
+        "title": "store name of the product, under 60 characters: the design idea + the product type "
+                 f"(for example \"Lion of Judah {('Embroidered ' if product.get('embroidery') else '')}T-Shirt\")",
+        "description": "HTML, 1-2 short paragraphs: the design on it and what the product is",
+        "bible_inspiration": "HTML: one fitting Bible verse (book chapter:verse in <strong>) quoted accurately, "
+                             "plus one sentence linking it to the design. Empty string if no verse clearly fits",
+        "story_behind_design": "HTML, one short paragraph about the idea of the design",
+        "product_info": "HTML <ul> of material / fit / care facts taken ONLY from the product facts below",
+        "seo_title": "…",
+        "meta_description": "…",
+    }
+    colors = ", ".join(item.get("color_names") or []) or "(not chosen yet)"
+    return f"""You are writing a store listing for a print-on-demand product.
+THE DESIGN IS THE PICTURE ATTACHED TO THIS MESSAGE: look at it and describe what it really shows.
+
+{_RULES}
+- Quote Bible verses accurately and name the translation only if you are sure of it.
+- The item is made to order and {method} by our print partner, then shipped; do not promise delivery times.
+- Do not mention Printify, the brand of the blank or the price in the title.
+
+Design file name: {Path(item.get('file') or '').name}
+Product: {product.get('title', '')} ({product.get('brand', '')} {product.get('model', '')}), the design is {method} on it
+Colors offered: {colors}
+
+Product facts (from the maker of the blank):
+{_plain(product.get('description', '')) or '(none)'}
+
+Return JSON with exactly these keys:
+{json.dumps(schema, ensure_ascii=False, indent=2)}
+"""
+
+
 # ------------------------------------------------------------------ reading the answer
 def clean_html(html: str) -> str:
     html = re.sub(r"<(script|style|iframe)\b.*?</\1\s*>", "", html, flags=re.S | re.I)
@@ -100,7 +144,8 @@ def _cut(text: str, limit: int) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) <= limit:
         return text
-    return text[:limit + 1].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    head = text[:limit + 1]
+    return (head.rsplit(" ", 1)[0] if " " in head else text[:limit]).rstrip(" ,;:-")
 
 
 def _find_json(text: str) -> dict:
@@ -119,9 +164,9 @@ def _find_json(text: str) -> dict:
 
 
 def parse_reply(text: str, kind: str) -> dict:
-    """kind: 'ebook' | 'pod'. Returns the cleaned listing or raises ValueError (Vietnamese message)."""
+    """kind: 'ebook' | 'pod' | 'design'. Returns the cleaned listing or raises ValueError (Vietnamese message)."""
     data = _find_json(text)
-    keys = EBOOK_KEYS if kind == "ebook" else POD_KEYS
+    keys = {"ebook": EBOOK_KEYS, "pod": POD_KEYS, "design": DESIGN_KEYS}[kind]
     out: dict = {}
     for key, typ in keys.items():
         val = data.get(key)
@@ -138,9 +183,9 @@ def parse_reply(text: str, kind: str) -> dict:
     for key in ("description", "who_for", "bible_inspiration", "story_behind_design", "product_info"):
         if key in out:
             out[key] = clean_html(out[key])
-    for key in ("subtitle", "seo_title"):
+    for key in ("subtitle", "seo_title", "title"):
         if key in out:
-            out[key] = _cut(out[key], 90 if key == "subtitle" else 70)
+            out[key] = _cut(out[key], {"subtitle": 90, "seo_title": 70, "title": 80}[key])
     out["meta_description"] = _cut(out["meta_description"], 160)
     if kind == "ebook":
         out["what_you_learn"] = [_cut(str(x), 200) for x in out["what_you_learn"] if str(x).strip()]

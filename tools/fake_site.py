@@ -17,6 +17,31 @@ REQUIRED = {"Ebook": ("title", "slug", "description", "price", "cover_image"),
             "Product": ("title", "slug", "category", "price", "images", "description", "spring_url")}
 OLD_PDF = re.compile(r"^mp/private/[^/]+/[0-9a-f]+_(.+)$")
 
+# print on demand: what the site answers for pod_catalog / pod_blueprint (the real numbers come from Printify)
+POD_BLUEPRINTS = {
+    12: {"title": "Unisex Jersey Short Sleeve Tee", "brand": "Bella+Canvas", "model": "3001", "category": "tshirts",
+         "provider": {"id": 99, "title": "Printify Choice"}, "from_cost": 1129, "default_price": 2199, "embroidery": False,
+         "colors": [{"id": 521, "title": "White", "hex": "#ffffff"}, {"id": 418, "title": "Black", "hex": "#000000"},
+                    {"id": 511, "title": "Navy", "hex": "#1f2a44"}],
+         "sizes": [{"id": 14, "title": "S"}, {"id": 15, "title": "M"}, {"id": 16, "title": "L"}, {"id": 17, "title": "XL"}, {"id": 18, "title": "2XL"}],
+         "positions": [{"position": "front", "width": 3600, "height": 4200, "method": "dtg"}, {"position": "back", "width": 3600, "height": 4200, "method": "dtg"}],
+         "description": "<p>100% Airlume combed and ring-spun cotton. Retail fit.</p>"},
+    77: {"title": "Unisex Heavy Blend™ Hooded Sweatshirt", "brand": "Gildan", "model": "18500", "category": "hoodies",
+         "provider": {"id": 99, "title": "Printify Choice"}, "from_cost": 2158, "default_price": 3199, "embroidery": False,
+         "colors": [{"id": 418, "title": "Black", "hex": "#000000"}], "sizes": [{"id": 14, "title": "S"}, {"id": 15, "title": "M"}],
+         "positions": [{"position": "front", "width": 3200, "height": 2100, "method": "dtg"}], "description": "<p>50% cotton, 50% polyester.</p>"},
+    1687: {"title": "Unisex Nantucket Crewneck Sweatshirt (Embroidery)", "brand": "Lane Seven", "model": "LS11004", "category": "embroidery",
+           "provider": {"id": 99, "title": "Printify Choice"}, "from_cost": 2737, "default_price": 3799, "embroidery": True,
+           "colors": [{"id": 5453, "title": "Navy Blue", "hex": "#4d6589"}], "sizes": [{"id": 14, "title": "S"}],
+           "positions": [{"position": "front_left_chest", "width": 1200, "height": 1200, "method": "embroidery"}], "description": "<p>Embroidered.</p>"},
+}
+for _id, _bp in POD_BLUEPRINTS.items():
+    _bp["id"] = _id
+    _bp["variants"] = [[_id * 1000 + i * 10 + j, c["id"], z["id"], _bp["from_cost"] + (219 if z["title"] == "2XL" else 0), 1]
+                       for i, c in enumerate(_bp["colors"]) for j, z in enumerate(_bp["sizes"])]
+    _bp["max_variants"] = 100
+POD_NAMES = {"tshirts": "T-shirts", "hoodies": "Hoodies", "sweatshirts": "Sweatshirts", "embroidery": "Embroidery"}
+
 
 class FakeSite:
     def __init__(self, port: int = 0):
@@ -29,6 +54,9 @@ class FakeSite:
         self.tickets: dict[str, dict] = {}
         self.blobs: dict[str, bytes] = {}  # public files by their address path (served back by GET)
         self.fail_upload = False
+        self.pod_created: list[dict] = []      # what pod_create received
+        self.pod_probed: list[int] = []        # blueprint ids whose prices were read
+        self.pod_synced = 0
         site = self
 
         class H(BaseHTTPRequestHandler):
@@ -139,9 +167,47 @@ class FakeSite:
                     row.update({"cover_image": images[0]} if body["entity"] == "Ebook" else {"images": images})
                     return self._json(200, {"ok": True})
                 entity = body.get("entity")
-                if entity not in site.records:
+                if entity not in site.records and not str(action).startswith("pod_"):
                     return self._json(400, {"error": "Unknown entity"})
-                rows = site.records[entity]
+                rows = site.records.get(entity, [])
+                if str(action).startswith("pod_"):
+                    if action == "pod_catalog":
+                        cats = []
+                        for key, name in POD_NAMES.items():
+                            items = [{"id": i, "title": b["title"], "brand": b["brand"], "model": b["model"], "image": "",
+                                      "from_cost": b["from_cost"] if i in site.pod_probed else None,
+                                      "provider": b["provider"]["title"] if i in site.pod_probed else None}
+                                     for i, b in POD_BLUEPRINTS.items() if b["category"] == key]
+                            items += [{"id": 9000 + n, "title": f"Other {name} {n}", "brand": "Generic", "model": "", "image": "",
+                                       "from_cost": None, "provider": None} for n in range(3)]
+                            cats.append({"key": key, "name": name, "bestsellers": items[:5], "all": items})
+                        return self._json(200, {"categories": cats})
+                    if action == "pod_blueprint":
+                        bp = POD_BLUEPRINTS.get(int(body.get("blueprint_id") or 0))
+                        if not bp:
+                            return self._json(500, {"error": "Printify 404: blueprint not found"})
+                        site.pod_probed.append(bp["id"])
+                        return self._json(200, bp)
+                    if action == "pod_sync":
+                        site.pod_synced += 1
+                        return self._json(200, {"created": ["Made In Printify Tee"], "updated": [], "skipped": [], "missing": []})
+                    if action == "pod_create":
+                        own = f"{site.base}/storage/v1/object/public/public-files/"
+                        url = str(body.get("design_url") or "")
+                        bp = POD_BLUEPRINTS.get(int(body.get("blueprint_id") or 0))
+                        listing = body.get("listing") or {}
+                        if not url.startswith(own) or url[len(site.base):] not in site.blobs:
+                            return self._json(400, {"error": "Ảnh thiết kế phải là PNG/JPG đã tải lên web."})
+                        if not bp or not body.get("colors") or not body.get("sizes") or not listing.get("title") or not listing.get("description"):
+                            return self._json(400, {"error": "Thiếu loại, màu, size hoặc mô tả."})
+                        site.pod_created.append(body)
+                        site.blobs.pop(url[len(site.base):], None)   # the site drops its copy once Printify has it
+                        price = float(body.get("price") or 0) or bp["default_price"] / 100
+                        rid = f"pod{len(site.pod_created)}"
+                        site.records["Product"].append({"id": rid, "title": listing["title"], "status": "draft", "printify": True})
+                        return self._json(200, {"id": rid, "created": True, "printify_product_id": f"pf{len(site.pod_created)}",
+                                                "price": price, "variants": len(body["colors"]) * len(body["sizes"]), "mockups": 12})
+                    return self._json(400, {"error": "Unknown action"})
                 if action == "list":
                     return self._json(200, {"items": [{k: r.get(k) for k in ("id", "title", "slug", "status")} for r in rows]})
                 if action == "upsert":

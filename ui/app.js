@@ -13,13 +13,16 @@ const THEMES = {
 const CATEGORIES = ["Apparel", "Wall Art", "Mugs", "Gifts", "Books"];
 const WEB_STATUS = { "": ["muted", "circle-dashed", "Chưa đăng"], draft: ["info", "file-pen-line", "Bản nháp trên web"], published: ["ok", "globe", "Đang bán trên web"] };
 
-const S = { page: "ebook", app: {}, config: {}, hasToken: false, ebooks: [], pods: [], busy: {}, errors: {},
+const S = { page: "ebook", app: {}, config: {}, hasToken: false, ebooks: [], pods: [], designs: [], busy: {}, errors: {},
+  catalog: null, catKey: "tshirts", catAll: false, catQ: "", bp: null, pick: { colors: [], sizes: [], position: "", price: "" },
   notes: null, restore: null, orders: null, analytics: null, anDays: 7, chat: { list: null, active: "", messages: [], error: "", sending: false }, podErrors: [], update: null, upd: null, ping: null, running: false };
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const icon = (name, cls = "") => `<i data-lucide="${name}" class="${cls}"></i>`;
 const money = (v) => Number(v || 0).toFixed(2);
-const list = (kind) => (kind === "ebook" ? S.ebooks : S.pods);
+const list = (kind) => ({ ebook: S.ebooks, pod: S.pods, design: S.designs }[kind] || []);
+// ready to go to the web: description written, and for a design also a product type and not made yet
+const ready = (kind, i) => i.has_listing && (kind === "pod" || (kind === "design" ? i.has_spec && !i.printify_id : i.has_cover));
 const find = (kind, id) => list(kind).find((i) => i.id === id);
 
 async function api(path, body = {}) {
@@ -39,6 +42,7 @@ function setState(d) {
   if ("has_token" in d) S.hasToken = d.has_token;
   if (d.ebooks) S.ebooks = d.ebooks;
   if (d.pods) S.pods = d.pods;
+  if (d.designs) S.designs = d.designs;
 }
 const PDF_MODES = {
   off: { label: "Tắt", hint: "Tải PDF lên đúng như file gốc." },
@@ -79,7 +83,7 @@ function applyTheme() {
 }
 
 /* ---------------- sidebar ---------------- */
-const NAV = [["ebook", "book-open", "Ebook"], ["pod", "shirt", "POD (Spring)"], ["chat", "message-circle", "Tin nhắn"], ["orders", "receipt", "Đơn hàng"], ["cart", "shopping-cart", "Giỏ & thanh toán"],
+const NAV = [["ebook", "book-open", "Ebook"], ["design", "shirt", "POD (Printify)"], ["pod", "link", "Spring (cũ)"], ["chat", "message-circle", "Tin nhắn"], ["orders", "receipt", "Đơn hàng"], ["cart", "shopping-cart", "Giỏ & thanh toán"],
   ["analytics", "chart-column", "Phân tích"], ["emails", "mail", "Email đăng ký"]];
 const NAV_BOTTOM = [["guide", "circle-help", "Hướng dẫn"], ["settings", "settings", "Cài đặt"]];
 function renderSidebar() {
@@ -118,11 +122,11 @@ function header(ic, title, desc, extra = "") {
 }
 function actionBar(kind) {
   const items = list(kind);
-  const ready = items.filter((i) => i.has_listing && (kind === "pod" || i.has_cover)).length;
+  const n = items.filter((i) => ready(kind, i)).length;
   return `<div class="action-bar">
-    <button class="btn gradient xl grow" data-act="publish-all" data-kind="${kind}" ${!ready || S.running ? "disabled" : ""}>
-      ${icon(S.running ? "loader-circle" : "cloud-upload", S.running ? "spin" : "")}${S.running ? "Đang đăng lên web…" : `Đăng ${ready} sản phẩm lên web (bản nháp)`}</button>
-    <span class="muted small" style="max-width:220px">${ready}/${items.length} sản phẩm đã đủ mô tả${kind === "ebook" ? " và ảnh bìa" : ""}</span>
+    <button class="btn gradient xl grow" data-act="publish-all" data-kind="${kind}" ${!n || S.running ? "disabled" : ""}>
+      ${icon(S.running ? "loader-circle" : "cloud-upload", S.running ? "spin" : "")}${S.running ? "Đang đăng lên web…" : `Đăng ${n} sản phẩm lên web (bản nháp)`}</button>
+    <span class="muted small" style="max-width:220px">${n}/${items.length} ${kind === "design" ? "thiết kế đã đủ loại sản phẩm, mô tả và chưa đăng" : `sản phẩm đã đủ mô tả${kind === "ebook" ? " và ảnh bìa" : ""}`}</span>
   </div>`;
 }
 
@@ -320,6 +324,87 @@ const PAGES = {
       ${actionBar("ebook")}</div>`;
   },
 
+  design() {
+    const cats = S.catalog?.categories || [];
+    const cat = cats.find((c) => c.key === S.catKey) || cats[0];
+    const from = (b) => (b.from_cost ? `From $${money(b.from_cost / 100)}` : "Bấm để xem giá");
+    const card = (b) => `<button class="bp-card ${S.bp?.id === b.id ? "active" : ""}" data-act="bp" data-id="${b.id}" title="${esc(b.title)}">
+      <span class="bp-img">${b.image ? `<img alt="" src="${esc(b.image)}" referrerpolicy="no-referrer" loading="lazy">` : icon("shirt")}</span>
+      <b>${esc(b.title)}</b><span class="bp-sub">${esc(b.brand)} ${esc(b.model)}</span><span class="bp-from">${from(b)}</span></button>`;
+    const q = S.catQ.trim().toLowerCase();
+    const all = (cat?.all || []).filter((b) => !q || `${b.title} ${b.brand} ${b.model}`.toLowerCase().includes(q));
+    const catalog = !S.hasToken ? `<div class="note">${icon("key-round")}<span>Kết nối web ở Cài đặt trước (mã bí mật), rồi tool mới đọc được danh mục Printify.</span></div>`
+      : S.catalog?.error ? `<div class="note bad">${icon("circle-alert")}<span class="grow">${esc(S.catalog.error)}</span><button class="btn soft sm" data-act="catalog">Thử lại</button></div>`
+      : !S.catalog ? `<div class="row muted">${icon("loader-circle", "spin")}Đang tải danh mục Printify…</div>`
+      : `<div class="row wrap"><div class="seg">${cats.map((c) => `<button class="${c.key === cat.key ? "active" : ""}" data-act="cat" data-key="${c.key}">${esc(c.name)}</button>`).join("")}</div>
+          <span class="muted small">${cat.all.length} loại · giá From là giá gốc Printify (chưa có ship)</span></div>
+        <div class="field-label">Bán chạy</div>
+        <div class="bp-grid">${cat.bestsellers.map(card).join("")}</div>
+        <div class="row"><button class="btn ghost sm" data-act="cat-all">${icon(S.catAll ? "chevron-up" : "list")}${S.catAll ? "Thu gọn" : `Xem tất cả ${cat.all.length} loại ${esc(cat.name)}`}</button></div>
+        ${S.catAll ? `<div class="input-icon">${icon("search")}<input class="input" id="cat-q" value="${esc(S.catQ)}" placeholder="Tìm theo tên, hãng, mã (ví dụ 5000, Comfort Colors)" aria-label="Tìm loại sản phẩm"></div>
+          <div class="bp-list">${all.slice(0, 300).map((b) => `<button class="bp-row ${S.bp?.id === b.id ? "active" : ""}" data-act="bp" data-id="${b.id}">
+            <b>${esc(b.title)}</b><span class="bp-sub">${esc(b.brand)} ${esc(b.model)}</span><span class="bp-from">${b.from_cost ? `From $${money(b.from_cost / 100)}` : ""}</span></button>`).join("") || `<span class="muted small">Không có loại nào khớp.</span>`}</div>` : ""}`;
+    const bp = S.bp;
+    const p = S.pick;
+    const count = bp ? bp.variants.filter((v) => v[4] && p.colors.includes(v[1]) && p.sizes.includes(v[2])).length : 0;
+    const area = bp ? (bp.positions.find((x) => x.position === p.position) || bp.positions[0]) : null;
+    const todo = S.designs.filter((d) => !d.printify_id);
+    const picker = S.busy.bp ? `<div class="card"><div class="row muted">${icon("loader-circle", "spin")}Đang đọc màu, size và giá gốc từ Printify (lần đầu mỗi loại mất vài giây)…</div></div>`
+      : !bp ? "" : `<div class="card"><div class="pick">
+        <span class="bp-img">${bp.image ? `<img alt="" src="${esc(bp.image)}" referrerpolicy="no-referrer">` : icon("shirt")}</span>
+        <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
+          <div><b>${esc(bp.title)}</b><div class="bp-sub">${esc(bp.brand)} ${esc(bp.model)} · nhà in ${esc(bp.provider.title)} · giá gốc từ $${money(bp.from_cost / 100)}</div></div>
+          ${bp.embroidery ? `<div class="note info">${icon("info")}<span>Sản phẩm thêu: thiết kế nên đơn giản, ít màu, nét đậm, nền trong suốt; không dùng ảnh chụp hay chuyển màu.</span></div>` : ""}
+          <div class="field-label">Màu (${p.colors.length}/${bp.colors.length}) <button class="btn ghost sm" data-act="pick-all-colors">Chọn hết</button><button class="btn ghost sm" data-act="pick-no-colors">Bỏ hết</button></div>
+          <div class="swatches">${bp.colors.map((c) => `<button class="swatch ${p.colors.includes(c.id) ? "on" : ""}" data-act="pick-color" data-id="${c.id}" title="${esc(c.title)}" aria-label="${esc(c.title)}" style="background:${esc(c.hex || "#888")}"></button>`).join("")}</div>
+          <div class="field-label">Size</div>
+          <div class="sizes">${bp.sizes.map((z) => `<button class="size ${p.sizes.includes(z.id) ? "on" : ""}" data-act="pick-size" data-id="${z.id}">${esc(z.title)}</button>`).join("")}</div>
+          <div class="row wrap">
+            ${bp.positions.length > 1 ? `<label class="field-label">Vị trí in <select class="select" id="pick-pos">${bp.positions.map((x) => `<option value="${esc(x.position)}" ${x.position === p.position ? "selected" : ""}>${esc(x.position)}</option>`).join("")}</select></label>` : `<span class="chip">Vị trí in: ${esc(area?.position || "")}</span>`}
+            <label class="field-label">Giá bán $ <input class="input" id="pick-price" inputmode="decimal" style="width:90px;height:32px" value="${esc(p.price)}" aria-label="Giá bán USD"></label>
+            <span class="pill ${count > bp.max_variants || !count ? "bad" : "ok"}">${count}/${bp.max_variants} biến thể</span>
+          </div>
+          ${area ? `<span class="muted small">File thiết kế nên lớn ít nhất ${area.width}×${area.height} px (PNG nền trong suốt). Size lớn tự cộng phần giá gốc chênh lệch.</span>` : ""}
+          <div class="row wrap"><button class="btn gradient" data-act="apply-all" ${!count || count > bp.max_variants || !todo.length ? "disabled" : ""}>${icon("wand-sparkles")}Áp dụng cho ${todo.length} thiết kế chưa đăng</button></div>
+        </div></div></div>`;
+    const rows = S.designs.map((it) => {
+      const sp = it.spec || {};
+      return `<div class="item ${S.busy[it.id] ? "busy" : ""}" data-kind="design" data-id="${esc(it.id)}">
+      <div class="thumb square design"><img alt="" src="/api/cover?kind=design&k=${encodeURIComponent(window.SESSION_KEY)}&id=${encodeURIComponent(it.id)}"></div>
+      <div class="item-main">
+        <input class="input bare" value="${esc(it.title)}" data-field="title" aria-label="Tên sản phẩm" ${it.printify_id ? "disabled" : ""}>
+        <div class="item-meta"><span class="chip">${icon("image")}${esc(it.file)}</span>
+          <span class="chip">${icon("shirt")}${sp.blueprint_id ? `${esc(sp.title)} · ${sp.colors.length} màu · ${sp.sizes.length} size` : "Chưa chọn loại"}</span>${pills(it)}</div>
+        ${itemError(it)}
+      </div>
+      <div class="item-side">
+        ${it.printify_id ? `<span class="pill ok">${icon("check")}Đã tạo trên Printify</span>` : `
+        ${bp && !S.busy.bp ? `<button class="btn ghost sm" data-act="apply-one" title="Dùng loại đang chọn ở trên cho thiết kế này">${icon("shirt")}Dùng loại này</button>` : ""}
+        <div class="price" title="Giá bán (USD)"><span>$</span><input class="input" inputmode="decimal" value="${money(it.price)}" data-field="price" aria-label="Giá bán USD"></div>
+        <button class="btn outline sm" data-act="write" ${sp.blueprint_id ? "" : "disabled title='Chọn loại sản phẩm trước'"}>${icon("sparkles")}${it.has_listing ? "Sửa mô tả" : "Viết mô tả"}</button>
+        <button class="btn soft sm" data-act="publish" ${S.busy[it.id] || S.running || !ready("design", it) ? "disabled" : ""}>${icon(S.busy[it.id] ? "loader-circle" : "cloud-upload", S.busy[it.id] ? "spin" : "")}${S.busy[it.id] ? "Đang tạo…" : "Đăng nháp"}</button>`}
+      </div></div>`;
+    }).join("");
+    return `<div class="page">
+      ${header("shirt", "POD (Printify)", "Đặt file thiết kế PNG/JPG trong một thư mục. Chọn loại sản phẩm, màu, size; tool tạo sản phẩm trên Printify (ảnh mockup có sẵn) rồi đăng lên web ở dạng bản nháp.",
+        `<button class="btn outline" data-act="pod-sync" ${S.busy.sync ? "disabled" : ""} title="Kéo các sản phẩm bạn tự làm trong Printify về web">${icon(S.busy.sync ? "loader-circle" : "refresh-cw", S.busy.sync ? "spin" : "")}Đồng bộ từ Printify</button>`)}
+      <div class="top-block">
+        <div class="row">
+          <div class="input-icon">${icon("folder-open")}<input class="input" id="dfolder" value="${esc(S.config.design_folder || "")}" placeholder="Thư mục chứa file thiết kế PNG/JPG, ví dụ E:\\DESIGNS" aria-label="Thư mục thiết kế"></div>
+          ${S.app.native ? `<button class="btn outline" style="height:44px" data-act="dpick">${icon("folder-search")}Chọn thư mục</button>` : ""}
+          <button class="btn soft" style="height:44px" data-act="dscan">${icon("scan-search")}Quét</button>
+        </div>
+      </div>
+      <div class="page-body">
+        <div class="pod-cat card">${catalog}</div>
+        ${picker}
+        <div style="height:12px"></div>
+        ${rows || `<div class="empty"><div class="icon-tile">${icon("image")}</div><b>Chưa có thiết kế nào</b>
+          <span>Chọn thư mục có file thiết kế (PNG nền trong suốt là tốt nhất) rồi bấm Quét. Tên file thành tên tạm của sản phẩm.</span></div>`}
+      </div>
+      ${actionBar("design")}</div>`;
+  },
+
   pod() {
     const errs = S.podErrors.map((e) => `<div class="note bad">${icon("circle-alert")}<span><b>${esc(e.url)}</b><br>${esc(e.error)}</span></div>`).join("");
     const rows = S.pods.map((it) => `<div class="item ${S.busy[it.id] ? "busy" : ""}" data-kind="pod" data-id="${esc(it.id)}">
@@ -334,7 +419,7 @@ const PAGES = {
       <div class="item-side">${itemSide(it)}
         <button class="btn ghost icon sm danger" data-act="remove" title="Bỏ khỏi danh sách" aria-label="Bỏ khỏi danh sách">${icon("trash-2")}</button></div></div>`).join("");
     return `<div class="page">
-      ${header("shirt", "POD (Spring)", "Dán link sản phẩm trên Spring. Tool lấy tên, giá, ảnh rồi đăng lên web kèm nút mua dẫn về Spring.")}
+      ${header("link", "Spring (cũ)", "Cách cũ: dán link sản phẩm trên Spring, nút mua trên web dẫn về Spring. Sản phẩm mới nên làm ở trang POD (Printify) để khách mua ngay trên web.")}
       <div class="top-block">
         <div class="row" style="align-items:stretch">
           <textarea class="textarea grow" id="urls" rows="2" placeholder="Dán link Spring, mỗi link một dòng" aria-label="Link Spring"></textarea>
@@ -547,10 +632,13 @@ const PAGES = {
             ${step("Viết mô tả", "Bấm Viết mô tả › Copy prompt › dán vào Claude hoặc ChatGPT › copy câu trả lời › dán lại vào tool › Lưu. Tool tự chuyển sang cuốn kế tiếp.")}
             ${step("Đăng lên web", "Bấm nút lớn phía dưới. Tool nén ảnh bìa sang WebP, nén PDF (Cài đặt › Nén file), tải PDF lên kho riêng tư và tạo sản phẩm ở trạng thái <b>bản nháp</b>. Vào trang Admin của web xem lại rồi chuyển sang Published.")}
           </div></div></section>
-        <section><div class="section-head"><div class="icon-tile sm">${icon("shirt")}</div><h2>Đăng sản phẩm POD</h2></div>
+        <section><div class="section-head"><div class="icon-tile sm">${icon("shirt")}</div><h2>Đăng áo POD (Printify)</h2></div>
           <div class="card"><div class="steps">
-            ${step("Dán link Spring", "Tạo sản phẩm trên Spring như bình thường, rồi dán link vào trang POD. Tool lấy tên, giá và ảnh.")}
-            ${step("Viết mô tả và đăng", "Giống ebook. Nút mua trên web sẽ dẫn khách về trang Spring của sản phẩm.")}
+            ${step("Quét thư mục thiết kế", "Để các file thiết kế PNG (nền trong suốt) hoặc JPG trong một thư mục, mở trang POD (Printify) › Quét. Tên file thành tên tạm.")}
+            ${step("Chọn loại sản phẩm", "Chọn nhóm (Áo thun, Hoodie, Sweatshirt, Thêu), bấm một loại bán chạy hoặc Xem tất cả. Chọn màu, size, giá bán (mặc định giá gốc + $10, áo thun $21.99), rồi Áp dụng cho các thiết kế. Size lớn tự cộng phần giá gốc chênh lệch; khách trả ship riêng.")}
+            ${step("Viết mô tả", "Như ebook, nhưng nhớ đính kèm file thiết kế vào Claude/ChatGPT cùng prompt để nó nhìn thấy hình.")}
+            ${step("Đăng nháp", "Tool tải thiết kế lên, tạo sản phẩm trên Printify (Printify tự làm ảnh mockup) và tạo sản phẩm bản nháp trên web. Vào Admin của web xem lại rồi bật Published.")}
+            ${step("Làm thẳng trên Printify cũng được", "Nếu bạn tự tạo sản phẩm trên printify.com, bấm Đồng bộ từ Printify: sản phẩm về web ở dạng bản nháp, giá và mô tả bạn sửa trên web được giữ nguyên.")}
           </div></div></section>
         <div class="note info">${icon("shield-check")}<span>Tool không bao giờ tự xuất bản hay xoá sản phẩm. Sản phẩm mới luôn là bản nháp; sản phẩm đã có trên web chỉ bị ghi đè khi bạn đồng ý.</span></div>
       </div></div></div>`;
@@ -562,15 +650,16 @@ function render() {
   const scroll = body && render.page === S.page ? body.scrollTop : 0;   // a new page starts at the top
   render.page = S.page;
   const keep = {};
-  for (const id of ["folder", "urls", "chat-reply"]) if ($("#" + id)) keep[id] = $("#" + id).value;
-  const focused = document.activeElement?.id === "chat-reply" ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+  for (const id of ["folder", "dfolder", "urls", "chat-reply"]) if ($("#" + id)) keep[id] = $("#" + id).value;
+  const fid = document.activeElement?.id;
+  const focused = ["chat-reply", "cat-q"].includes(fid) ? [fid, document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const threadTop = $("#chat-thread")?.scrollTop;
   renderSidebar();
   $("#main").innerHTML = PAGES[S.page]();
   for (const [id, v] of Object.entries(keep)) if ($("#" + id)) $("#" + id).value = v;
   if ($(".page-body")) $(".page-body").scrollTop = scroll;
   if (threadTop !== undefined && $("#chat-thread")) $("#chat-thread").scrollTop = threadTop;
-  if (focused && $("#chat-reply")) { $("#chat-reply").focus(); $("#chat-reply").setSelectionRange(...focused); }
+  if (focused && $("#" + focused[0])) { $("#" + focused[0]).focus(); $("#" + focused[0]).setSelectionRange(focused[1], focused[2]); }
   lucide.createIcons();
 }
 
@@ -596,7 +685,7 @@ async function openWriter(kind, id) {
   writer = { kind, id, prompt: "" };
   dialog(`<div class="dialog-head"><div class="icon-tile sm">${icon("sparkles")}</div><h2 class="grow">${esc(it.title)}</h2>
       <button class="btn ghost icon sm" data-act="close" aria-label="Đóng">${icon("x")}</button></div>
-    <div class="dialog-body" id="w-body"><div class="row muted">${icon("loader-circle", "spin")}Đang đọc ${kind === "ebook" ? "PDF" : "sản phẩm"} và soạn prompt…</div></div>`);
+    <div class="dialog-body" id="w-body"><div class="row muted">${icon("loader-circle", "spin")}Đang đọc ${kind === "ebook" ? "PDF" : kind === "design" ? "loại sản phẩm" : "sản phẩm"} và soạn prompt…</div></div>`);
   let data, saved;
   try {
     [data, saved] = await Promise.all([api("/api/item/prompt", { kind, id }), api("/api/item/listing", { kind, id })]);
@@ -633,7 +722,7 @@ async function saveWriter() {
     const res = await api("/api/item/reply", { kind, id, text: $("#w-reply").value });
     Object.assign(find(kind, id), res.item);
     delete S.errors[id];
-    const next = list(kind).find((i) => !i.has_listing);
+    const next = list(kind).find((i) => !i.has_listing && (kind !== "design" || (i.has_spec && !i.printify_id)));
     toast("success", next ? `Đã lưu mô tả. Tiếp theo: ${next.title}` : "Đã lưu mô tả. Tất cả sản phẩm đã có mô tả.");
     render();
     if (next) openWriter(kind, next.id); else closeDialog();
@@ -664,7 +753,7 @@ async function publish(kind, id, { ask = true, overwrite = false } = {}) {
   }
 }
 async function publishAll(kind) {
-  const todo = list(kind).filter((i) => i.has_listing && (kind === "pod" || i.has_cover));
+  const todo = list(kind).filter((i) => ready(kind, i));
   S.running = true; render();
   let ok = 0;
   const pdf = { before: 0, after: 0 };
@@ -677,6 +766,54 @@ async function publishAll(kind) {
   S.running = false; render();
   toast(ok === todo.length ? "success" : "error", `Đã đăng ${ok}/${todo.length} sản phẩm lên web ở dạng bản nháp.${pdfText(pdf)}${ok < todo.length ? " Xem lỗi ở từng dòng." : ""}`);
 }
+/* ---------------- POD (Printify) ---------------- */
+async function scanDesigns(folder) {
+  try {
+    const res = await api("/api/designs/scan", { folder });
+    setState(res);
+    if ($("#dfolder")) $("#dfolder").value = S.config.design_folder;
+    toast("success", `Tìm thấy ${res.found} file thiết kế.`);
+  } catch (e) { toast("error", e.message); }
+  render();
+}
+async function loadCatalog(force) {
+  if (!S.hasToken || (S.catalog && !S.catalog.error && !force)) return;
+  S.catalog = null; render();
+  try { S.catalog = await api("/api/pod/catalog"); } catch (e) { S.catalog = { error: e.message }; }
+  render();
+}
+async function pickBlueprint(id) {
+  S.busy.bp = true; render();
+  try {
+    const bp = await api("/api/pod/blueprint", { id });
+    S.bp = bp;
+    const black = bp.colors.filter((c) => /^(black|white)$/i.test(c.title)).map((c) => c.id);
+    let sizes = bp.sizes.map((z) => z.id);
+    let colors = black.length ? black : bp.colors.slice(0, 2).map((c) => c.id);
+    if (colors.length * sizes.length > bp.max_variants) sizes = sizes.slice(0, Math.floor(bp.max_variants / colors.length));
+    S.pick = { colors, sizes, position: (bp.positions.find((x) => /front/.test(x.position)) || bp.positions[0])?.position || "",
+      price: money(bp.default_price / 100) };
+    // the price we just learned shows on the catalog card too
+    for (const c of S.catalog?.categories || []) for (const b of [...c.bestsellers, ...c.all]) if (b.id === id) { b.from_cost = bp.from_cost; b.provider = bp.provider.title; }
+  } catch (e) { toast("error", e.message); }
+  delete S.busy.bp; render();
+}
+function togglePick(key, id) {
+  const arr = S.pick[key];
+  S.pick[key] = arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id];
+  render();
+}
+async function applySpec(ids) {
+  const bp = S.bp;
+  const spec = { blueprint_id: bp.id, title: bp.title, colors: S.pick.colors, sizes: S.pick.sizes, position: S.pick.position };
+  try {
+    const res = await api("/api/designs/apply", { ids, spec, price: S.pick.price });
+    setState(res);
+    toast("success", `Đã gán ${bp.title} cho ${res.applied} thiết kế. Bước tiếp: Viết mô tả.`);
+  } catch (e) { toast("error", e.message); }
+  render();
+}
+
 async function scan(folder) {
   try {
     const res = await api("/api/ebooks/scan", { folder });
@@ -738,9 +875,29 @@ const ACTIONS = {
   "chat-send"() { sendChat(); },
   restore() { runRestore(); },
   write(el, row) { openWriter(row.dataset.kind, row.dataset.id); },
-  publish(el, row) { publish(row.dataset.kind, row.dataset.id).then((res) => res && toast("success", `Đã đăng lên web ở dạng bản nháp.${pdfText(res.pdf)}`)); },
+  publish(el, row) { publish(row.dataset.kind, row.dataset.id).then((res) => res && toast("success", row.dataset.kind === "design" ? "Đã tạo sản phẩm trên Printify và đăng lên web ở dạng bản nháp." : `Đã đăng lên web ở dạng bản nháp.${pdfText(res.pdf)}`)); },
   "publish-all"(el) { publishAll(el.dataset.kind); },
-  async remove(el, row) { await api("/api/item/remove", { kind: row.dataset.kind, id: row.dataset.id }); S.pods = S.pods.filter((i) => i.id !== row.dataset.id); render(); },
+  async dpick() { try { const r = await api("/api/pick-folder"); if (r.folder) { $("#dfolder").value = r.folder; scanDesigns(r.folder); } } catch (e) { toast("error", e.message); } },
+  dscan() { scanDesigns($("#dfolder").value); },
+  catalog() { loadCatalog(true); },
+  cat(el) { S.catKey = el.dataset.key; S.catQ = ""; render(); },
+  "cat-all"() { S.catAll = !S.catAll; render(); },
+  bp(el) { pickBlueprint(Number(el.dataset.id)); },
+  "pick-color"(el) { togglePick("colors", Number(el.dataset.id)); },
+  "pick-size"(el) { togglePick("sizes", Number(el.dataset.id)); },
+  "pick-all-colors"() { S.pick.colors = S.bp.colors.map((c) => c.id); render(); },
+  "pick-no-colors"() { S.pick.colors = []; render(); },
+  "apply-all"() { applySpec(S.designs.filter((d) => !d.printify_id).map((d) => d.id)); },
+  "apply-one"(el, row) { applySpec([row.dataset.id]); },
+  async "pod-sync"() {
+    S.busy.sync = true; render();
+    try {
+      const r = await api("/api/pod/sync");
+      toast("success", `Đã đồng bộ từ Printify: thêm ${r.created.length} sản phẩm (bản nháp), cập nhật ${r.updated.length}.${r.created.length ? " Vào Admin của web để xem và bật bán." : ""}`);
+    } catch (e) { toast("error", e.message); }
+    delete S.busy.sync; render();
+  },
+  async remove(el, row) { await api("/api/item/remove", { kind: row.dataset.kind, id: row.dataset.id }); S.pods = S.pods.filter((i) => i.id !== row.dataset.id); S.designs = S.designs.filter((i) => i.id !== row.dataset.id); render(); },
   async "pods-add"() {
     const urls = $("#urls").value;
     S.busy.pods = true; render();
@@ -780,7 +937,7 @@ const ACTIONS = {
 
 document.addEventListener("click", (ev) => {
   const nav = ev.target.closest("[data-nav]");
-  if (nav) { S.page = nav.dataset.nav; render(); if (S.page === "orders") markOrdersSeen(); if (S.page === "orders") loadSite("orders"); if (AN_PAGES.includes(S.page)) loadAnalytics(); return; }
+  if (nav) { S.page = nav.dataset.nav; render(); if (S.page === "design" && !S.catalog) loadCatalog(); if (S.page === "orders") markOrdersSeen(); if (S.page === "orders") loadSite("orders"); if (AN_PAGES.includes(S.page)) loadAnalytics(); return; }
   const el = ev.target.closest("[data-act]");
   if (el && !el.disabled && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el, el.closest(".item"), ev);
 });
@@ -788,6 +945,8 @@ document.addEventListener("change", async (ev) => {
   const el = ev.target;
   try {
     if (el.dataset.config) { setState(await api("/api/config", { [el.dataset.config]: el.value })); toast("success", "Đã lưu."); render(); return; }
+    if (el.id === "pick-pos") { S.pick.position = el.value; render(); return; }
+    if (el.id === "pick-price") { S.pick.price = el.value; return; }
     const row = el.closest(".item");
     if (el.dataset.field && row) {
       const res = await api("/api/item/update", { kind: row.dataset.kind, id: row.dataset.id, [el.dataset.field]: el.value });
@@ -796,10 +955,15 @@ document.addEventListener("change", async (ev) => {
     }
   } catch (e) { toast("error", e.message); render(); }
 });
+document.addEventListener("input", (ev) => {
+  if (ev.target.id === "cat-q") { S.catQ = ev.target.value; render(); }
+  if (ev.target.id === "pick-price") S.pick.price = ev.target.value;
+});
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && $("#overlay").innerHTML && !$("#w-reply")?.value) { closeDialog(); writer = null; }
   if (ev.key === "Enter" && ev.target.matches("input[data-field], input[data-config]")) ev.target.blur();
   if (ev.key === "Enter" && ev.target.id === "folder") scan(ev.target.value);
+  if (ev.key === "Enter" && ev.target.id === "dfolder") scanDesigns(ev.target.value);
   if (ev.key === "Enter" && !ev.shiftKey && ev.target.id === "chat-reply") { ev.preventDefault(); sendChat(); }
 });
 

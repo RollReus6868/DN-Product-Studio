@@ -41,6 +41,8 @@ GOOD = {"subtitle": "A study edition", "description": "<p>Hook.</p><h3>Inside</h
 POD_GOOD = {"description": "<p>A tee.</p>", "bible_inspiration": "<p><strong>Exodus 13:21</strong> — text</p>",
             "story_behind_design": "<p>Story.</p>", "product_info": "", "seo_title": "Tee", "meta_description": "A tee."}
 
+DESIGN_GOOD = {"title": "Lion of Judah Tee", **POD_GOOD}
+
 
 def make_folder(td: str, names=("The-Book-of-Enoch", "Jubilees_Part-1")) -> None:
     for n in names:
@@ -61,6 +63,14 @@ class ScanTests(unittest.TestCase):
             self.assertTrue(all(e["cover"] for e in found["ebooks"] if e["title"] != "No Cover"))
             self.assertEqual(found["no_cover"], ["No-Cover.PDF"])
             self.assertEqual(found["no_pdf"], ["Lonely.jpg"])
+
+    def test_designs(self):
+        with tempfile.TemporaryDirectory() as td:
+            for n in ("Lion_of-Judah.png", "cross.JPG", "notes.txt", ".hidden.png", "art.pdf"):
+                (Path(td) / n).write_bytes(b"x")
+            self.assertEqual([d["title"] for d in scan.scan_designs(td)], ["Lion of Judah", "cross"])
+        with self.assertRaises(ValueError):
+            scan.scan_designs(td)
 
     def test_missing_folder(self):
         with self.assertRaises(ValueError):
@@ -121,6 +131,18 @@ class PromptTests(unittest.TestCase):
         self.assertIn("https://x.creator-spring.com/listing/a", prompts.pod_prompt(
             {"title": "Tee", "category": "Apparel", "price": 25, "spring_url": "https://x.creator-spring.com/listing/a"}))
         self.assertEqual(prompts.parse_reply(json.dumps(POD_GOOD), "pod")["product_info"], "")
+
+
+    def test_design(self):
+        product = {"title": "Unisex Tee", "brand": "Bella+Canvas", "model": "3001", "description": "<p>100% cotton.</p>",
+                   "embroidery": True}
+        text = prompts.design_prompt({"file": "/x/Lion.png", "title": "Lion", "price": 21.99, "color_names": ["Black"]}, product)
+        for part in ("ATTACHED", "Lion.png", "Bella+Canvas 3001", "100% cotton", "embroidered", "Black", '"title"'):
+            self.assertIn(part, text)
+        out = prompts.parse_reply(json.dumps(dict(DESIGN_GOOD, title="T" * 120)), "design")
+        self.assertEqual(len(out["title"]), 80)
+        with self.assertRaises(ValueError):
+            prompts.parse_reply(json.dumps(POD_GOOD), "design")   # the title is required
 
 
 class SpringTests(unittest.TestCase):
@@ -285,6 +307,29 @@ class PublishTests(unittest.TestCase):
         item["images"] = [f"{base}/missing.gif"]
         with self.assertRaises(webstore.SiteError):
             webstore.publish_pod(item, {}, self.client)
+
+    def test_design_becomes_a_printify_product_and_a_draft(self):
+        Image.new("RGBA", (400, 500), (200, 30, 30, 255)).save(Path(self.td) / "Lion.png")
+        item = {"id": "d", "title": "Lion of Judah Tee", "file": str(Path(self.td) / "Lion.png"), "price": 0,
+                "spec": {"blueprint_id": 12, "colors": [418], "sizes": [14, 15], "position": "front"}}
+        with self.assertRaises(webstore.SiteError) as e:
+            webstore.publish_design(item, self.client)
+        self.assertEqual(e.exception.code, "incomplete")
+        item["listing"] = dict(POD_GOOD)
+        web = webstore.publish_design(item, self.client)
+        sent = self.site.pod_created[0]
+        self.assertEqual((sent["blueprint_id"], sent["colors"], sent["sizes"], sent["position"], sent["design_name"]),
+                         (12, [418], [14, 15], "front", "Lion.png"))
+        self.assertEqual(sent["listing"]["title"], "Lion of Judah Tee")
+        self.assertNotIn("price", sent, "no price set: the site uses its default")
+        self.assertEqual((web["status"], web["printify_product_id"], item["price"]), ("draft", "pf1", 21.99))
+        self.assertEqual(self.site.files[0]["head"][:4], b"\x89PNG", "the original file is sent, not a WebP copy")
+        self.assertFalse(self.site.files[0]["private"])
+        self.assertEqual(self.site.blobs, {}, "the site removed the design once Printify had it")
+        with self.assertRaises(webstore.SiteError) as e:
+            webstore.publish_design(item, self.client)
+        self.assertEqual(e.exception.code, "done")
+        self.assertEqual(len(self.site.pod_created), 1)
 
 
 def bloated_pdf(path: Path, pages: int = 4) -> None:
@@ -492,6 +537,52 @@ class ServerTests(unittest.TestCase):
         self.call("/api/chat/reply", {"id": "c1", "body": "   "}, status=400)
         self.assertEqual(self.call("/api/chat/reply", {"id": "c1", "body": " Hi there "})["message"]["body"], "Hi there")
         self.assertEqual(len(self.site.chats[0]["messages"]), 2)
+
+    def test_design_flow(self):
+        td = tempfile.mkdtemp()
+        Image.new("RGBA", (300, 300), (0, 0, 0, 0)).save(Path(td) / "Lion-of-Judah.png")
+        self.call("/api/designs/scan", {"folder": ""}, status=400)
+        st = self.call("/api/designs/scan", {"folder": td})
+        self.assertEqual((st["found"], st["config"]["design_folder"]), (1, td))
+        d = st["designs"][0]
+        self.assertEqual((d["title"], d["has_spec"], d["has_listing"], d["printify_id"]), ("Lion of Judah", False, False, ""))
+        thumb = requests.get(self.url + "api/cover", params={"k": server.KEY, "kind": "design", "id": d["id"]}, timeout=10)
+        self.assertEqual(thumb.content[:2], b"\xff\xd8")
+
+        cat = self.call("/api/pod/catalog")
+        self.assertEqual([c["key"] for c in cat["categories"]], ["tshirts", "hoodies", "sweatshirts", "embroidery"])
+        self.assertTrue(all(len(c["bestsellers"]) <= 5 for c in cat["categories"]))
+        bp = self.call("/api/pod/blueprint", {"id": 12})
+        self.assertEqual((bp["from_cost"], bp["default_price"]), (1129, 2199))
+        self.call("/api/pod/blueprint", {"id": 12})
+        self.assertEqual(self.site.pod_probed.count(12), 1, "the tool keeps what it already read")
+        self.call("/api/pod/blueprint", {"id": "x"}, status=400)
+
+        spec = {"blueprint_id": 12, "title": bp["title"], "colors": [418, 521], "sizes": [14, 15, 16], "position": "front"}
+        self.call("/api/designs/apply", {"ids": [d["id"]], "spec": {"blueprint_id": 12, "colors": ["x"]}}, status=400)
+        st = self.call("/api/designs/apply", {"ids": [d["id"], "nope"], "spec": spec, "price": "22.99"})
+        d = st["designs"][0]
+        self.assertEqual((st["applied"], d["has_spec"], d["price"]), (1, True, 22.99))
+
+        pr = self.call("/api/item/prompt", {"kind": "design", "id": d["id"]})
+        self.assertIn("Bella+Canvas 3001", pr["prompt"])
+        self.assertIn("White", pr["prompt"])
+        self.assertEqual(pr["attach"], "file thiết kế Lion-of-Judah.png")
+        item = self.call("/api/item/reply", {"kind": "design", "id": d["id"], "text": json.dumps(DESIGN_GOOD)})["item"]
+        self.assertEqual((item["title"], item["has_listing"]), ("Lion of Judah Tee", True))
+
+        item = self.call("/api/item/publish", {"kind": "design", "id": d["id"]})["item"]
+        self.assertEqual((item["web_status"], item["printify_id"]), ("draft", "pf1"))
+        sent = self.site.pod_created[-1]
+        self.assertEqual((sent["colors"], sent["sizes"], sent["price"]), ([418, 521], [14, 15, 16], 22.99))
+        self.assertEqual(self.call("/api/item/publish", {"kind": "design", "id": d["id"]}, status=400)["code"], "done")
+        # a design already made into a product keeps its type
+        self.assertEqual(self.call("/api/designs/apply", {"ids": [d["id"]], "spec": dict(spec, blueprint_id=77)})["applied"], 0)
+        again = self.call("/api/designs/scan", {"folder": td})["designs"][0]
+        self.assertEqual((again["printify_id"], again["spec"]["blueprint_id"]), ("pf1", 12))
+
+        self.assertEqual(self.call("/api/pod/sync")["created"], ["Made In Printify Tee"])
+        self.assertEqual(self.site.pod_synced, 1)
 
     def test_config_validation(self):
         self.assertEqual(self.call("/api/config", {"pdf_shrink": "strong", "default_price": "7.5"})["config"]["pdf_shrink"], "strong")

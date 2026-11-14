@@ -122,6 +122,25 @@ class SiteClient:
         base = self.url.split("/functions/")[0]
         return isinstance(url, str) and url.startswith(base + "/storage/v1/object/public/public-files/")
 
+    # ---- print on demand through Printify (the site holds the Printify key)
+    def pod_catalog(self) -> dict:
+        """{categories: [{key, name, bestsellers: [blueprint], all: [blueprint]}]}; blueprint = {id, title,
+        brand, model, image, from_cost (cents or None until read), provider}"""
+        return self._call(90, json={"action": "pod_catalog"})
+
+    def pod_blueprint(self, blueprint_id: int, fresh: bool = False) -> dict:
+        """One product type: provider, from_cost, default_price (cents), colors [{id,title,hex}], sizes [{id,title}],
+        variants [[id, color, size, cost, available]], positions, embroidery, max_variants. The first call for a
+        type reads Printify's prices (a few seconds); the site keeps the answer for a week."""
+        return self._call(120, json={"action": "pod_blueprint", "blueprint_id": blueprint_id, "fresh": fresh})
+
+    def pod_sync(self) -> dict:
+        """Copy products made in Printify itself to the site (new ones as drafts)."""
+        return self._call(180, json={"action": "pod_sync"})
+
+    def pod_create(self, data: dict) -> dict:
+        return self._call(240, json={"action": "pod_create", **data})
+
     def pending_pdfs(self) -> list[dict]:
         """Books on the site whose PDF still has to be uploaded again: [{title, file_name}]."""
         return self._call(60, json={"action": "pending_pdfs"}).get("items") or []
@@ -285,4 +304,45 @@ def publish_pod(item: dict, cfg: dict, client: SiteClient, overwrite: bool = Fal
             "spring_url": item["spring_url"], "shipping_info": SHIPPING_INFO, **listing}
     res = client.upsert("Product", data, web.get("id", ""), overwrite)
     web.update(id=res.get("id", ""), status=res.get("status", "draft"), slug=slug)
+    return web
+
+
+DESIGN_MAX = 50 * 1024 * 1024   # the site's storage takes at most 50 MB per file
+
+
+def publish_design(item: dict, client: SiteClient) -> dict:
+    """Design file -> the site's storage -> Printify product (the chosen type, colours, sizes) -> draft on
+    the site with the listing text. A design is made into a product once; change it later in Printify."""
+    web = item.setdefault("web", {})
+    if web.get("printify_product_id"):
+        raise SiteError("Thiết kế này đã thành sản phẩm trên Printify và web. Muốn sửa, sửa trong Admin của web "
+                        "(chữ, giá) hoặc trong Printify rồi bấm “Đồng bộ từ Printify”.", "done")
+    listing = item.get("listing")
+    if not listing:
+        raise SiteError("Chưa có mô tả. Bấm “Viết mô tả” trước.", "incomplete")
+    spec = item.get("spec") or {}
+    if not spec.get("blueprint_id"):
+        raise SiteError("Chưa chọn loại sản phẩm (áo thun, hoodie…).", "incomplete")
+    if not spec.get("colors") or not spec.get("sizes"):
+        raise SiteError("Chưa chọn màu hoặc size.", "incomplete")
+    path = Path(item["file"])
+    if not path.is_file():
+        raise SiteError(f"Không còn thấy file: {path}", "incomplete")
+    if path.stat().st_size > DESIGN_MAX:
+        raise SiteError("File thiết kế lớn hơn 50 MB. Hãy lưu lại PNG nhẹ hơn (vẫn giữ kích thước pixel).", "too_large")
+    ext = ".png" if path.suffix.lower() == ".png" else ".jpg"
+    if not web.get("design_url"):
+        with open(path, "rb") as fh:   # the original, unchanged: it is what gets printed
+            web["design_url"] = client.upload(_safe_name(path.stem, ext), fh, False)
+    data = {"blueprint_id": spec["blueprint_id"], "colors": spec["colors"], "sizes": spec["sizes"],
+            "position": spec.get("position") or "", "design_url": web["design_url"], "design_name": path.name,
+            "listing": {**listing, "title": item["title"]}}
+    if float(item.get("price") or 0) > 0:
+        data["price"] = float(item["price"])
+    res = client.pod_create(data)
+    web.pop("design_url", None)   # the site removed its copy once Printify had it
+    web.update(id=res.get("id", ""), status="draft", printify_product_id=res.get("printify_product_id", ""),
+               slug=slugify(item["title"]), price=res.get("price"))
+    if res.get("price"):
+        item["price"] = res["price"]
     return web

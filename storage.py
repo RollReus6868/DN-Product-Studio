@@ -15,6 +15,7 @@ DEFAULTS = {
     "default_price": 9.99,
     "pdf_shrink": "safe",   # PDFs before upload: "off", "safe" (lossless) or "strong" (re-saves big pictures)
     "ebook_folder": "",
+    "design_folder": "",   # print-on-demand designs (PNG / JPG) for Printify
     "theme": "gold",
     "mode": "dark",
     "sidebar_open": True,
@@ -65,10 +66,11 @@ def save_config(changes: dict) -> dict:
 
 
 def load_items() -> dict:
-    """{"ebook": {id: item}, "pod": {id: item}} — everything the user has prepared so far."""
+    """{"ebook": {id: item}, "pod": {id: item}, "design": {id: item}} — everything the user has prepared so far.
+    pod = Spring links (old), design = a design file that becomes a Printify product."""
     with _lock:
         data = _read("items.json", {})
-        return {"ebook": dict(data.get("ebook") or {}), "pod": dict(data.get("pod") or {})}
+        return {k: dict(data.get(k) or {}) for k in ("ebook", "pod", "design")}
 
 
 def save_items(items: dict) -> None:

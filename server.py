@@ -56,7 +56,7 @@ def _client(cfg: dict) -> webstore.SiteClient:
 
 
 def _get(kind: str, item_id: str) -> tuple[dict, dict]:
-    if kind not in ("ebook", "pod"):
+    if kind not in ("ebook", "pod", "design"):
         raise ApiError("Loại sản phẩm không hợp lệ.")
     items = storage.load_items()
     item = items[kind].get(item_id)
@@ -74,6 +74,10 @@ def _public(item: dict, kind: str) -> dict:
                web_status=web.get("status", "") if web.get("id") else "", slug=web.get("slug", ""))
     if kind == "ebook":
         out["file"] = Path(item["pdf"]).name
+    if kind == "design":
+        spec = item.get("spec") or {}
+        out.update(file=Path(item["file"]).name, spec=spec, has_spec=bool(spec.get("blueprint_id") and spec.get("colors") and spec.get("sizes")),
+                   printify_id=web.get("printify_product_id", ""))
     return out
 
 
@@ -87,7 +91,9 @@ def api_state(_body: dict) -> dict:
                     "kind_text": updater.KIND_TEXT.get(updater.install_kind(), ""),
                     "native": window is not None},
             "config": cfg, "has_token": bool(storage.get_token()),
-            "ebooks": ebooks, "pods": [_public(i, "pod") for i in items["pod"].values()]}
+            "ebooks": ebooks, "pods": [_public(i, "pod") for i in items["pod"].values()],
+            "designs": [_public(i, "design") for i in items["design"].values()
+                        if cfg["design_folder"] and Path(i["id"]).parent == Path(cfg["design_folder"]) and Path(i["id"]).is_file()]}
 
 
 def api_config(body: dict) -> dict:
@@ -155,6 +161,12 @@ def api_item_update(body: dict) -> dict:
             if not 0 < price < 10000:
                 raise ApiError("Giá phải lớn hơn 0.")
             item["price"] = price
+        if "spec" in body and body["kind"] == "design":
+            item["spec"] = _clean_spec(body["spec"])
+            if body.get("default_price") and not item.get("price_set"):
+                item["price"] = round(float(body["default_price"]), 2)
+        if "price" in body and body.get("kind") == "design":
+            item["price_set"] = True
         if "category" in body:
             if body["category"] not in spring.CATEGORIES:
                 raise ApiError("Danh mục không hợp lệ.")
@@ -176,6 +188,14 @@ def api_item_prompt(body: dict) -> dict:
     items, item = _get(kind, body.get("id"))
     if kind == "pod":
         return {"prompt": prompts.pod_prompt(item), "attach": "ảnh sản phẩm (nếu muốn mô tả sát thiết kế)"}
+    if kind == "design":
+        spec = item.get("spec") or {}
+        if not spec.get("blueprint_id"):
+            raise ApiError("Chọn loại sản phẩm (áo thun, hoodie…) cho thiết kế này trước, rồi mới viết mô tả.")
+        product = _blueprint(int(spec["blueprint_id"]))
+        names = {c["id"]: c["title"] for c in product.get("colors") or []}
+        return {"prompt": prompts.design_prompt({**item, "color_names": [names.get(c, "") for c in spec.get("colors") or []]}, product),
+                "attach": f"file thiết kế {Path(item['file']).name}"}
     sig = webstore.file_sig(item["pdf"])
     pdf = _pdf_cache.get((item["pdf"], sig))
     if pdf is None:
@@ -196,11 +216,13 @@ def api_item_prompt(body: dict) -> dict:
 def api_item_reply(body: dict) -> dict:
     kind = body.get("kind")
     try:
-        listing = prompts.parse_reply(str(body.get("text") or ""), kind if kind in ("ebook", "pod") else "ebook")
+        listing = prompts.parse_reply(str(body.get("text") or ""), kind if kind in ("ebook", "pod", "design") else "ebook")
     except ValueError as exc:
         raise ApiError(str(exc)) from exc
     with _lock:
         items, item = _get(kind, body.get("id"))
+        if kind == "design" and listing.get("title"):
+            item["title"] = listing.pop("title")
         item["listing"] = listing
         storage.save_items(items)
     return {"item": _public(item, kind), "listing": listing}
@@ -215,10 +237,13 @@ def api_item_publish(body: dict) -> dict:
     kind = body.get("kind")
     items, item = _get(kind, body.get("id"))
     cfg = storage.load_config()
-    fn = webstore.publish_ebook if kind == "ebook" else webstore.publish_pod
     pdf_sig = (item.get("web") or {}).get("pdf_sig")
     try:
-        fn(item, cfg, _client(cfg), overwrite=bool(body.get("overwrite")))
+        if kind == "design":
+            webstore.publish_design(item, _client(cfg))
+        else:
+            fn = webstore.publish_ebook if kind == "ebook" else webstore.publish_pod
+            fn(item, cfg, _client(cfg), overwrite=bool(body.get("overwrite")))
     except webstore.SiteError as exc:
         raise ApiError(str(exc), exc.code) from exc
     finally:
@@ -227,6 +252,8 @@ def api_item_publish(body: dict) -> dict:
             fresh = storage.load_items()
             if body["id"] in fresh[kind]:
                 fresh[kind][body["id"]]["web"] = item.get("web") or {}
+                if kind == "design":
+                    fresh[kind][body["id"]]["price"] = item.get("price")
                 storage.save_items(fresh)
     web = item.get("web") or {}
     # sizes of the PDF this call uploaded (before / after compression), for the message in the window
@@ -255,6 +282,96 @@ def api_pods_add(body: dict) -> dict:
             storage.save_items(items)
         added += 1
     return {**api_state({}), "added": added, "errors": errors}
+
+
+# ------------------------------------------------------------------ print on demand (Printify, through the site)
+_bp_cache: dict = {}
+
+
+def _blueprint(blueprint_id: int, fresh: bool = False) -> dict:
+    if fresh or blueprint_id not in _bp_cache:
+        cfg = storage.load_config()
+        try:
+            _bp_cache[blueprint_id] = _client(cfg).pod_blueprint(blueprint_id, fresh)
+        except webstore.SiteError as exc:
+            raise ApiError(str(exc), exc.code) from exc
+    return _bp_cache[blueprint_id]
+
+
+def _clean_spec(spec) -> dict:
+    spec = spec if isinstance(spec, dict) else {}
+    try:
+        bp = int(spec.get("blueprint_id") or 0)
+        colors = [int(c) for c in spec.get("colors") or []]
+        sizes = [int(z) for z in spec.get("sizes") or []]
+    except (TypeError, ValueError) as exc:
+        raise ApiError("Lựa chọn loại sản phẩm không hợp lệ.") from exc
+    return {"blueprint_id": bp, "title": str(spec.get("title") or "")[:200], "colors": colors, "sizes": sizes,
+            "position": str(spec.get("position") or "")[:60]}
+
+
+def api_designs_scan(body: dict) -> dict:
+    folder = str(body.get("folder") or "").strip().strip('"')
+    if not folder:
+        raise ApiError("Chưa chọn thư mục chứa file thiết kế (PNG/JPG).")
+    try:
+        found = scan.scan_designs(folder)
+    except ValueError as exc:
+        raise ApiError(str(exc)) from exc
+    storage.save_config({"design_folder": str(Path(folder).expanduser())})
+    with _lock:
+        items = storage.load_items()
+        for d in found:
+            if d["id"] not in items["design"]:
+                items["design"][d["id"]] = {**d, "price": 0}
+        storage.save_items(items)
+    return {**api_state({}), "found": len(found)}
+
+
+def api_designs_apply(body: dict) -> dict:
+    """Give one product type (+ colours, sizes, price) to several designs not yet made into products."""
+    spec = _clean_spec(body.get("spec"))
+    ids = [str(i) for i in body.get("ids") or []]
+    try:
+        price = round(float(body.get("price") or 0), 2)
+    except (TypeError, ValueError) as exc:
+        raise ApiError("Giá phải là số, ví dụ 21.99") from exc
+    with _lock:
+        items = storage.load_items()
+        n = 0
+        for i in ids:
+            item = items["design"].get(i)
+            if not item or (item.get("web") or {}).get("printify_product_id"):
+                continue
+            item["spec"] = spec
+            if price > 0:
+                item["price"], item["price_set"] = price, False
+            n += 1
+        storage.save_items(items)
+    return {**api_state({}), "applied": n}
+
+
+def api_pod_catalog(_body: dict) -> dict:
+    cfg = storage.load_config()
+    try:
+        return _client(cfg).pod_catalog()
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
+
+
+def api_pod_blueprint(body: dict) -> dict:
+    try:
+        return _blueprint(int(body.get("id") or 0), bool(body.get("fresh")))
+    except (TypeError, ValueError) as exc:
+        raise ApiError("Loại sản phẩm không hợp lệ.") from exc
+
+
+def api_pod_sync(_body: dict) -> dict:
+    cfg = storage.load_config()
+    try:
+        return _client(cfg).pod_sync()
+    except webstore.SiteError as exc:
+        raise ApiError(str(exc), exc.code) from exc
 
 
 # ------------------------------------------------------------------ PDFs of books copied from the old site
@@ -422,6 +539,8 @@ def api_update_progress(_body: dict) -> dict:
 ROUTES = {
     "/api/state": api_state, "/api/config": api_config, "/api/pick-folder": api_pick_folder,
     "/api/ebooks/scan": api_scan, "/api/pods/add": api_pods_add,
+    "/api/designs/scan": api_designs_scan, "/api/designs/apply": api_designs_apply,
+    "/api/pod/catalog": api_pod_catalog, "/api/pod/blueprint": api_pod_blueprint, "/api/pod/sync": api_pod_sync,
     "/api/item/update": api_item_update, "/api/item/remove": api_item_remove,
     "/api/item/prompt": api_item_prompt, "/api/item/reply": api_item_reply,
     "/api/item/listing": api_item_listing, "/api/item/publish": api_item_publish,
@@ -441,6 +560,11 @@ def _thumb(path: str) -> bytes:
         from PIL import Image
 
         with Image.open(path) as im:
+            if im.mode in ("RGBA", "LA", "P"):   # transparent design: show it on a mid grey so dark and light ink both read
+                im = im.convert("RGBA")
+                back = Image.new("RGBA", im.size, (128, 128, 128, 255))
+                back.alpha_composite(im)
+                im = back
             im = im.convert("RGB")
             im.thumbnail((240, 336))
             buf = io.BytesIO()
@@ -478,9 +602,10 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(url.query)
             if q.get("k", [""])[0] != KEY:
                 return self._send(403, b"forbidden", "text/plain")
-            item = storage.load_items()["ebook"].get(q.get("id", [""])[0])
+            kind = q.get("kind", ["ebook"])[0]
+            item = storage.load_items().get(kind if kind in ("ebook", "design") else "ebook", {}).get(q.get("id", [""])[0])
             try:
-                return self._send(200, _thumb(item["cover"]), "image/jpeg")
+                return self._send(200, _thumb(item["cover"] if kind != "design" else item["file"]), "image/jpeg")
             except Exception:  # noqa: BLE001 - missing / unreadable cover: the UI shows a placeholder
                 return self._send(404, b"", "text/plain")
         name = "index.html" if url.path in ("/", "/index.html") else url.path.lstrip("/")

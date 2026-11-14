@@ -66,7 +66,7 @@ os.environ["DNPS_TOOL_TOKEN"] = "test-token-0123456789abcdefgh"
 os.environ["DNPS_UPDATE_API"] = EXTRA
 
 from fake_site import FakeSite  # noqa: E402
-from test_core import GOOD, POD_GOOD  # noqa: E402  (also points APPDATA at a temp folder first)
+from test_core import DESIGN_GOOD, GOOD, POD_GOOD  # noqa: E402  (also points APPDATA at a temp folder first)
 
 os.environ["APPDATA"] = tempfile.mkdtemp(prefix="dnps_ui_")
 import server  # noqa: E402
@@ -134,6 +134,12 @@ for i, (name, color) in enumerate([("The-Book-of-Enoch_A-Black-Readers-Study-Edi
         im = Image.new("RGB", (1055, 1491), color)
         ImageDraw.Draw(im).rectangle((120, 200, 935, 1290), outline="#c79a3a", width=14)
         im.save(books / f"{name}.png")
+
+designs = Path(tempfile.mkdtemp(prefix="DESIGNS_"))
+for name, color in (("Lion-of-Judah", "#c79a3a"), ("Exodus_Route", "#e8e0cc")):
+    im = Image.new("RGBA", (900, 1100), (0, 0, 0, 0))
+    ImageDraw.Draw(im).ellipse((150, 200, 750, 800), fill=color)
+    im.save(designs / f"{name}.png")
 
 errors: list[str] = []
 
@@ -239,6 +245,48 @@ def main() -> int:
                 assert [r["category"] for r in site.records["Product"]] == ["Mugs", "Apparel"], site.records["Product"]
                 page.wait_for_timeout(4500)
             shot("07_pod")
+            page.click('[data-nav="design"]')
+            page.wait_for_selector(".bp-card")
+            if first:
+                shot("07p_design_empty")
+                page.fill("#dfolder", str(designs))
+                page.click('[data-act="dscan"]')
+                page.wait_for_function("document.querySelectorAll('.item').length === 2")
+                page.click('[data-act="cat-all"]')
+                page.fill("#cat-q", "other t")
+                page.wait_for_function("document.querySelectorAll('.bp-row').length === 3")
+                assert page.evaluate("document.activeElement.id") == "cat-q", "typing in the search keeps the focus"
+                page.click('[data-act="cat-all"]')
+                page.click('.bp-card[data-id="12"]')
+                page.wait_for_selector(".swatch")
+                assert page.input_value("#pick-price") == "21.99"
+                assert page.inner_text(".pick .pill").startswith("10/100"), page.inner_text(".pick .pill")   # black + white, 5 sizes
+                assert "From $11.29" in page.inner_text('.bp-card[data-id="12"]')
+                page.click('[data-act="pick-color"][title="Navy"]')
+                page.click('[data-act="pick-size"]:has-text("2XL")')
+                assert page.inner_text(".pick .pill").startswith("12/100")
+                shot("07q_design_picked")
+                page.click('[data-act="apply-all"]')
+                page.wait_for_function("document.querySelectorAll('.item [data-act=write]:not([disabled])').length === 2")
+                page.locator(".item").first.locator('[data-act="write"]').click()
+                for _ in range(2):   # saving moves on to the next design
+                    page.wait_for_selector("#w-reply")
+                    assert "Nhớ đính kèm file thiết kế" in page.inner_text("#w-body")
+                    page.fill("#w-reply", json.dumps(DESIGN_GOOD))
+                    page.click('[data-act="w-save"]')
+                    page.wait_for_timeout(500)
+                page.click('[data-act="publish-all"]')
+                page.wait_for_function("[...document.querySelectorAll('.item .pill.ok')].filter(p => p.innerText.includes('Printify')).length === 2", timeout=60000)
+                sent = site.pod_created
+                assert len(sent) == 2 and sent[0]["colors"] == [521, 418, 511] and sent[0]["sizes"] == [14, 15, 16, 17], sent[0]
+                page.click('[data-act="pod-sync"]')
+                page.wait_for_selector("text=Đã đồng bộ từ Printify")
+                page.wait_for_timeout(4500)
+            else:
+                page.click('[data-act="cat"][data-key="hoodies"]')
+                page.click('.bp-card[data-id="77"]')
+                page.wait_for_selector(".swatch")
+            shot("07r_design")
             page.click('[data-nav="chat"]')
             page.wait_for_selector(".conv")
             if first:
@@ -318,6 +366,9 @@ def main() -> int:
             page.click('[data-act="sidebar"]')
             page.click('[data-nav="pod"]')
             shot("14_pod_light_collapsed")
+            page.click('[data-nav="design"]')
+            page.wait_for_selector(".bp-card")
+            shot("15_design_light_collapsed")
             page.click('[data-act="sidebar"]')
             page.click('[data-act="mode"]')
             ctx.close()

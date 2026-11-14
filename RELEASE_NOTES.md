@@ -1,4 +1,16 @@
-# DN Product Studio 1.5.0
+# DN Product Studio 1.6.0
+
+- **POD (Printify)** (mục mới): đăng áo POD thẳng từ file thiết kế, khách mua ngay trên web (không còn dẫn sang Spring).
+  1. Chọn thư mục chứa file thiết kế PNG (nền trong suốt) hoặc JPG › **Quét**.
+  2. Chọn nhóm **T-shirts, Hoodies, Sweatshirts, Embroidery**: 5 loại bán chạy hiện giá gốc “From $…”, bấm **Xem tất cả** để tìm loại khác. Bấm một loại để xem màu, size và giá gốc.
+  3. Chọn màu (mặc định Đen + Trắng), size (mặc định tất cả), vị trí in và giá bán (mặc định giá gốc + $10 làm tròn .99; áo thun $21.99). Size lớn tự cộng đúng phần giá gốc chênh lệch, khách trả ship riêng. Bấm **Áp dụng** cho các thiết kế.
+  4. **Viết mô tả** như ebook (nhớ đính kèm file thiết kế cho Claude/ChatGPT xem).
+  5. **Đăng**: tool tải thiết kế lên, tạo sản phẩm trên Printify (Printify tự làm ảnh mockup) và tạo sản phẩm **bản nháp** trên web. Vào Admin của web xem lại rồi bật Published.
+- Nút **Đồng bộ từ Printify**: sản phẩm bạn tự tạo trên printify.com cũng về web ở dạng bản nháp.
+- Mục POD cũ đổi tên thành **Spring (cũ)**, vẫn dùng được.
+- Mỗi sản phẩm tối đa 100 biến thể (màu × size), tool báo khi vượt.
+
+Từ bản 1.5.0:
 
 - **Ảnh nhẹ hơn**: ảnh bìa ebook và ảnh sản phẩm POD được đổi sang **WebP** trước khi tải lên (bìa tối đa 640×960). Cùng độ nét trên web nhưng nhẹ hơn JPG nhiều lần, web tải nhanh hơn và tốn ít băng thông Supabase.
 - **Nén PDF** trước khi tải lên (Cài đặt › Nén file khi tải lên):
@@ -50,10 +62,10 @@ Các tính năng từ bản 1.0.0:
 
 | Máy của bạn | File |
 |---|---|
-| Windows (khuyên dùng) | `DNProductStudio-1.5.0-windows-setup.exe` |
-| Windows, không muốn cài | `DNProductStudio-1.5.0-windows-portable.exe` |
-| Mac chip Apple (M1 trở lên) | `DNProductStudio-1.5.0-mac-arm64.zip` |
-| Mac chip Intel | `DNProductStudio-1.5.0-mac-x64.zip` |
+| Windows (khuyên dùng) | `DNProductStudio-1.6.0-windows-setup.exe` |
+| Windows, không muốn cài | `DNProductStudio-1.6.0-windows-portable.exe` |
+| Mac chip Apple (M1 trở lên) | `DNProductStudio-1.6.0-mac-arm64.zip` |
+| Mac chip Intel | `DNProductStudio-1.6.0-mac-x64.zip` |
 
 Windows có thể hiện “Windows protected your PC”: bấm **More info › Run anyway** (app chưa mua chữ ký số).
 Mac: giải nén, kéo vào Applications, lần đầu bấm chuột phải › **Open**.

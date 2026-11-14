@@ -1,6 +1,6 @@
-# DN Product Studio 1.5.0
+# DN Product Studio 1.6.0
 
-Tool đăng sản phẩm lên website Dark Network: **ebook** (PDF + ảnh bìa) và **POD qua Spring**. Chạy trên Windows và macOS, tự cập nhật.
+Tool đăng sản phẩm lên website Dark Network: **ebook** (PDF + ảnh bìa) và **áo POD qua Printify** (từ file thiết kế). Chạy trên Windows và macOS, tự cập nhật.
 
 ## Tải về
 

@@ -37,3 +37,15 @@ def scan_folder(folder: str) -> dict:
                        "cover": str(cover) if cover else ""})
     no_pdf = [p.name for k, p in images.items() if k not in used]
     return {"ebooks": ebooks, "no_cover": no_cover, "no_pdf": sorted(no_pdf)}
+
+
+DESIGN_EXT = (".png", ".jpg", ".jpeg")   # what Printify accepts for a print file
+
+
+def scan_designs(folder: str) -> list[dict]:
+    """Print-on-demand designs in a folder: every PNG / JPG -> {id, title, file}."""
+    root = Path(folder).expanduser()
+    if not root.is_dir():
+        raise ValueError(f"Không thấy thư mục: {folder}")
+    files = sorted(p for p in root.iterdir() if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in DESIGN_EXT)
+    return [{"id": str(p), "title": title_from_stem(p.stem), "file": str(p)} for p in files]
